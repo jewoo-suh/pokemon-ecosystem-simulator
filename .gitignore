@@ -40,3 +40,6 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Raw data files (regeneratable via data loader)
+services/data_loader/data/
