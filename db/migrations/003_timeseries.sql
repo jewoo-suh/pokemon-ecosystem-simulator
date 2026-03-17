@@ -1,6 +1,11 @@
 -- ============================================================
--- Migration 003: Time-Series Tables (TimescaleDB)
+-- Migration 003: Time-Series Tables
 -- Population tracking and ecosystem events over simulation ticks
+--
+-- NOTE: This migration works with plain PostgreSQL.
+-- When TimescaleDB is available (via Docker), uncomment the
+-- create_hypertable() calls and continuous aggregate views
+-- for optimized time-series performance.
 -- ============================================================
 
 BEGIN;
@@ -24,9 +29,8 @@ CREATE TABLE population_snapshots (
     recorded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Convert to TimescaleDB hypertable for efficient time-series queries
--- Partitions by tick for fast range scans
-SELECT create_hypertable('population_snapshots', 'tick', chunk_time_interval => 100);
+-- TimescaleDB upgrade (uncomment when available):
+-- SELECT create_hypertable('population_snapshots', 'tick', chunk_time_interval => 100);
 
 CREATE INDEX idx_pop_pokemon ON population_snapshots(pokemon_id, tick);
 CREATE INDEX idx_pop_biome ON population_snapshots(biome_id, tick);
@@ -47,7 +51,7 @@ CREATE TYPE event_type_enum AS ENUM (
 );
 
 CREATE TABLE ecosystem_events (
-    id              SERIAL,
+    id              SERIAL PRIMARY KEY,
     tick            INT NOT NULL,
     event_type      event_type_enum NOT NULL,
     pokemon_id      INT REFERENCES pokemon(id),
@@ -57,20 +61,21 @@ CREATE TABLE ecosystem_events (
     recorded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-SELECT create_hypertable('ecosystem_events', 'tick', chunk_time_interval => 500);
+-- TimescaleDB upgrade (uncomment when available):
+-- SELECT create_hypertable('ecosystem_events', 'tick', chunk_time_interval => 500);
 
 CREATE INDEX idx_events_type ON ecosystem_events(event_type, tick);
 CREATE INDEX idx_events_pokemon ON ecosystem_events(pokemon_id, tick);
 CREATE INDEX idx_events_biome ON ecosystem_events(biome_id, tick);
 
 -- --------------------------
--- Continuous Aggregates (materialized views)
+-- Materialized Views
 -- Pre-computed rollups for common API queries
+-- Refresh manually or via cron after simulation runs
 -- --------------------------
 
--- Population totals per biome per tick (avoids expensive GROUP BY at query time)
-CREATE MATERIALIZED VIEW biome_population_summary
-WITH (timescaledb.continuous) AS
+-- Population totals per biome per tick
+CREATE MATERIALIZED VIEW biome_population_summary AS
 SELECT
     tick,
     biome_id,
@@ -83,8 +88,7 @@ GROUP BY tick, biome_id
 WITH NO DATA;
 
 -- Population totals per pokemon across all biomes
-CREATE MATERIALIZED VIEW species_population_summary
-WITH (timescaledb.continuous) AS
+CREATE MATERIALIZED VIEW species_population_summary AS
 SELECT
     tick,
     pokemon_id,

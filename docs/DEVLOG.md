@@ -61,3 +61,55 @@
 - Set up dbt project for deriving sim params and food chain rules
 - Build DB loader to insert raw JSON into PostgreSQL
 - Derive trophic levels and type-based food chain pairs
+
+---
+
+## 2026-03-16 — DB Loading, dbt Transformations & Simulation Engine
+
+### What happened
+- Built DB loader to insert raw JSON into PostgreSQL tables
+- Set up dbt project with staging + derived models
+- Fixed simulation parameter formulas to use `GREATEST(attack, sp_attack)` for hunt_power and `GREATEST(defense, sp_defense)` for escape_power (fairness for special attackers/defenders)
+- Created `derived_default_habitats` model to assign biomes to 640+ Gen 5+ Pokemon missing habitat data
+- Added migration 004 for simulation state table (mutable "whiteboard")
+- Built simulation engine with 8-phase tick loop
+- Implemented legendary/mythical immortality (94 Pokemon)
+
+### Simulation Engine Phases (per tick)
+1. Producer food regeneration
+2. Metabolism (hunger drain, legendaries exempt)
+3. Predation (hunt_power vs escape_power, legendaries can't be hunted)
+4. Mortality + starvation (legendaries immortal)
+5. Reproduction (legendaries don't reproduce)
+6. Evolution (per-individual chance, requires stability + food)
+7. Migration (speed-based, fraction of population moves between biomes)
+8. Stability counter updates
+
+### Decisions made
+- **GREATEST() for combat stats:** Using `GREATEST(attack, sp_attack)` for hunt_power ensures special attackers like Gardevoir (125 SpAtk) aren't undersold. Same pattern for escape_power and natural_mortality.
+- **Type-based default habitats:** Gen 5+ Pokemon had no PokeAPI habitat data. Created type-to-biome mapping (e.g., water->sea, fire->mountain) expanding connected Pokemon from 382 to 856.
+- **Legendary immortality:** Legendaries/mythicals don't starve, can't be hunted, don't die, don't reproduce. They're eternal forces of nature.
+- **Per-individual evolution:** Small probability per individual per tick (base_evolution_rate = 0.02), not mass evolution. Requires stability and food satiation.
+- **TimescaleDB deferred:** Using plain PostgreSQL for now since TimescaleDB requires Docker (needs system restart). Hypertable calls commented out.
+- **Simulation state as "whiteboard":** `simulation_state` table is mutable (read/write each tick), while `population_snapshots` is append-only history.
+
+### Files created/modified
+- `services/data_loader/db_loader.py` — Loads raw JSON into PostgreSQL
+- `dbt_project/pokemon_ecosystem/models/staging/` — stg_pokemon.sql, stg_pokemon_types.sql, sources.yml
+- `dbt_project/pokemon_ecosystem/models/derived/` — derived_sim_params.sql, derived_trophic_levels.sql, derived_food_chain.sql, derived_default_habitats.sql
+- `db/migrations/004_simulation_state.sql` — Simulation state + metadata tables
+- `services/simulation/engine.py` — Core simulation engine (8-phase tick loop)
+- `services/simulation/run.py` — CLI runner (`python run.py 50 --fresh`)
+- `services/simulation/config.py` — DB connection config
+
+### Test run results (50 ticks, --fresh)
+- 856 species-biome pairs initialized
+- 0 legendary extinctions (immortality working)
+- Gardevoir thriving: pop 41+13 across biomes, food_satiation 0.93-0.96
+- Mewtwo surviving: pop 2+8, food_satiation 0.70-1.0
+- Rayquaza stable: pop 5+2
+
+### Next steps
+- Build FastAPI REST layer
+- Docker Compose orchestration
+- Phase 2: Frontend visualization with time scrubbing

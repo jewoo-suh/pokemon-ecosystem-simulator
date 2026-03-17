@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: public
+    schema: public
+    tables:
+      - name: pokemon
+      - name: types
+      - name: type_effectiveness
+      - name: biomes
+      - name: pokemon_types
+      - name: pokemon_habitats
+      - name: evolution_chains
+      - name: food_chain
+      - name: simulation_config

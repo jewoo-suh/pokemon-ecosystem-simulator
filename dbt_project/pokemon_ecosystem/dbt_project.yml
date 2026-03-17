@@ -1,0 +1,21 @@
+name: 'pokemon_ecosystem'
+version: '1.0.0'
+profile: 'pokemon_ecosystem'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  pokemon_ecosystem:
+    staging:
+      +materialized: view
+    derived:
+      +materialized: table
