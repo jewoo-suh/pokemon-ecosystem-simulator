@@ -23,6 +23,12 @@ WITH trophic_rank AS (
     FROM {{ ref('derived_trophic_levels') }}
 ),
 
+pokemon_bst AS (
+    SELECT id AS pokemon_id,
+           (hp + attack + defense + sp_attack + sp_defense + speed) AS bst
+    FROM {{ source('public', 'pokemon') }}
+),
+
 pokemon_primary_type AS (
     SELECT pt.pokemon_id, pt.type_id
     FROM {{ source('public', 'pokemon_types') }} pt
@@ -53,13 +59,21 @@ existing_pairs AS (
 candidates AS (
     SELECT DISTINCT
         pred_type.pokemon_id AS predator_id,
-        prey_type.pokemon_id AS prey_id
+        prey_type.pokemon_id AS prey_id,
+        pred_bst.bst AS pred_bst,
+        prey_bst.bst AS prey_bst
     FROM super_effective se
     JOIN pokemon_primary_type pred_type ON se.atk_type_id = pred_type.type_id
     JOIN pokemon_primary_type prey_type ON se.def_type_id = prey_type.type_id
     JOIN trophic_rank pred_rank ON pred_type.pokemon_id = pred_rank.pokemon_id
     JOIN trophic_rank prey_rank ON prey_type.pokemon_id = prey_rank.pokemon_id
+    JOIN pokemon_bst pred_bst ON pred_type.pokemon_id = pred_bst.pokemon_id
+    JOIN pokemon_bst prey_bst ON prey_type.pokemon_id = prey_bst.pokemon_id
     WHERE pred_rank.rank > prey_rank.rank
+    -- Power gate: predator must have at least 60% of prey's BST
+    -- Caterpie (195) can't hunt Torterra (525): 195/525 = 0.37 < 0.6
+    -- Butterfree (395) can hunt Oddish (320): 395/320 = 1.23 > 0.6
+    AND pred_bst.bst >= prey_bst.bst * 0.6
     AND EXISTS (
         SELECT 1 FROM shared_biomes sb
         WHERE sb.pokemon_a = pred_type.pokemon_id
@@ -76,6 +90,7 @@ candidates AS (
 SELECT
     predator_id,
     prey_id,
-    0.3 AS probability,
+    -- Scale probability by power ratio: closer in strength = harder hunt
+    LEAST(0.4, GREATEST(0.1, (pred_bst::numeric / GREATEST(prey_bst, 1)::numeric - 0.6) * 0.5 + 0.1))::numeric(3,2) AS probability,
     'derived' AS source
 FROM candidates

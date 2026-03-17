@@ -36,6 +36,7 @@ class SimulationEngine:
         self.trophic_levels = {}
         self.food_chain = {}       # predator_id -> [(prey_id, probability)]
         self.prey_of = {}          # prey_id -> [predator_id]
+        self.predator_count = {}   # pokemon_id -> number of predators targeting it
         self.evolution_map = {}    # from_pokemon_id -> [(to_pokemon_id, min_pop, order)]
         self.biome_capacity = {}
         self.legendaries = set()   # pokemon_ids that are legendary/mythical (immortal)
@@ -75,6 +76,9 @@ class SimulationEngine:
         for pred_id, prey_id, prob in cur.fetchall():
             self.food_chain.setdefault(pred_id, []).append((prey_id, float(prob)))
             self.prey_of.setdefault(prey_id, []).append(pred_id)
+
+        # Pre-compute predator pressure per species (for prey-pressure reproduction bonus)
+        self.predator_count = {pid: len(preds) for pid, preds in self.prey_of.items()}
 
         # Evolution chains
         cur.execute("""
@@ -228,9 +232,17 @@ class SimulationEngine:
             params = self.sim_params.get(pokemon_id)
             if not params:
                 continue
-            state["food_satiation"] = max(0.0, state["food_satiation"] - params["metabolism"])
 
-        # --- Phase 3: Predation (with prey-switching) ---
+            # Small population scavenging: rare species can forage scraps
+            # Reduced metabolism when population is small (less competition for food)
+            metabolism = params["metabolism"]
+            if state["population"] < 20:
+                scavenge_bonus = 1.0 - (state["population"] / 20.0) * 0.5  # up to 50% reduced metabolism
+                metabolism *= (1.0 - scavenge_bonus * 0.5)
+
+            state["food_satiation"] = max(0.0, state["food_satiation"] - metabolism)
+
+        # --- Phase 3: Predation (with prey-switching & saturation) ---
         encounter_chance = self.config["predation_encounter_chance"]
 
         # Pre-compute biome populations for prey-switching
@@ -238,6 +250,9 @@ class SimulationEngine:
         for (pid, bid), s in self.state.items():
             if s["population"] > 0:
                 biome_prey_pops.setdefault(bid, {})[pid] = s["population"]
+
+        # Track total kills per prey species-biome this tick (for saturation cap)
+        prey_losses = {}  # (prey_id, biome_id) -> total caught so far
 
         for key, state in self.state.items():
             if state["population"] <= 0:
@@ -267,13 +282,25 @@ class SimulationEngine:
                 if not prey_params:
                     continue
 
+                # Predation saturation: prey can only lose up to 30% of their
+                # starting pop per tick across ALL predators combined.
+                # Models finite hunting hours, prey fleeing/hiding after attacks
+                start_pop = biome_prey_pops.get(biome_id, {}).get(prey_id, 0)
+                max_losses = max(1, int(start_pop * 0.30))
+                already_lost = prey_losses.get(prey_key, 0)
+                if already_lost >= max_losses:
+                    continue  # this prey has been hunted enough this tick
+
                 # Prey-switching: predators focus on abundant prey
-                # More abundant prey = higher encounter multiplier
                 prey_pop = prey_state["population"]
                 biome_total = sum(biome_pops.values())
                 prey_abundance = prey_pop / max(1, biome_total)
-                # Abundant species (>10% of biome) get hunted 2-3x more
                 abundance_mult = 1.0 + prey_abundance * 5.0
+
+                # Refuge effect: small populations are harder to find
+                if prey_pop < 20:
+                    refuge_mult = prey_pop / 20.0
+                    abundance_mult *= refuge_mult
 
                 # Number of encounters this tick
                 encounters = int(state["population"] * encounter_chance * abundance_mult)
@@ -285,6 +312,13 @@ class SimulationEngine:
                 escape = prey_params["escape_power"]
                 success_rate = (hunt / (hunt + escape)) * base_prob
 
+                # Predator dilution: species with many predators have each
+                # individual predator contribute less (predators compete/interfere)
+                num_preds = self.predator_count.get(prey_id, 1)
+                if num_preds > 10:
+                    dilution = 10.0 / num_preds  # 115 predators -> each is ~9% effective
+                    success_rate *= dilution
+
                 # How many prey are caught
                 caught = 0
                 for _ in range(min(encounters, prey_state["population"])):
@@ -292,9 +326,11 @@ class SimulationEngine:
                         caught += 1
 
                 if caught > 0:
-                    # Cap catches to prey population
-                    caught = min(caught, prey_state["population"])
+                    # Cap by prey population AND saturation limit
+                    remaining_quota = max_losses - already_lost
+                    caught = min(caught, prey_state["population"], remaining_quota)
                     prey_state["population"] -= caught
+                    prey_losses[prey_key] = already_lost + caught
                     # Predator gets fed
                     food_gain = min(0.3, caught * 0.05 / max(1, state["population"]))
                     state["food_satiation"] = min(1.0, state["food_satiation"] + food_gain)
@@ -370,7 +406,11 @@ class SimulationEngine:
                 continue
 
             # Must be fed enough to reproduce
-            if state["food_satiation"] < repro_threshold:
+            # Small populations get a lower threshold (survival pressure)
+            effective_threshold = repro_threshold
+            if state["population"] < 10:
+                effective_threshold *= 0.5  # desperate times, desperate measures
+            if state["food_satiation"] < effective_threshold:
                 continue
 
             # Check carrying capacity
@@ -395,7 +435,17 @@ class SimulationEngine:
             growth_factor = max(0.0, 1.0 - niche_saturation)
 
             # Birth rate scales with population and repro_rate
-            birth_rate = min(0.5, params["repro_rate"] / 100.0) * growth_factor
+            base_birth = min(0.5, params["repro_rate"] / 100.0)
+
+            # Prey-pressure bonus: species with many predators breed faster
+            # Models evolutionary pressure — hunted species become prolific breeders
+            num_predators = self.predator_count.get(pokemon_id, 0)
+            if num_predators > 10:
+                # Up to 2x birth rate for heavily hunted species (30+ predators)
+                prey_pressure_bonus = 1.0 + min(1.0, (num_predators - 10) / 20.0)
+                base_birth *= prey_pressure_bonus
+
+            birth_rate = min(0.6, base_birth) * growth_factor
             if birth_rate <= 0.001:
                 continue
 

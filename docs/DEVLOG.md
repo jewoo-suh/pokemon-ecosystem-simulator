@@ -162,6 +162,49 @@ The simulation converged to a winner-take-all state within 500 ticks. 9 species 
 - Pikachu: 301 pop, Gardevoir: 30 pop, Mewtwo/Rayquaza: immortal
 - Population slowly declining (80K→67K) — may need more ticks to stabilize
 
+---
+
+## 2026-03-17 — Food Chain Realism & Predation Balance
+
+### Problem
+Caterpie (BST 195) was listed as a predator of Torterra (BST 525). The derived food chain only checked type effectiveness + trophic level, not actual combat power. Grass types had 115-118 predators each because every fire/ice/flying/poison/bug Pokemon counted as a predator.
+
+### Root cause analysis
+Queried alive vs extinct species and found the smoking gun:
+- Alive species: avg 6.6 predator threats
+- Extinct species: avg 31.1 predator threats
+- Stats (repro, metabolism, BST) were nearly identical — the difference was purely food chain connectivity
+
+### Fixes applied
+
+**1. BST Power Gate (dbt model)**
+- Predator must have ≥60% of prey's BST to hunt it
+- Caterpie (195) vs Torterra (525): 195/525 = 0.37 < 0.60 → blocked
+- Butterfree (395) vs Oddish (320): 395/320 = 1.23 > 0.60 → allowed
+- Probability now scales with power ratio instead of flat 0.3
+
+**2. Predation Saturation (engine)**
+- Prey can only lose up to 30% of starting population per tick across ALL predators
+- Models finite hunting hours — prey flee/hide after sustained attacks
+
+**3. Predator Dilution (engine)**
+- Species with 10+ predators: each predator's success rate is diluted
+- 115 predators → each is ~9% as effective (predators interfere with each other)
+
+**4. Prey-Pressure Breeding (engine)**
+- Species with 10+ predators get up to 2x reproduction rate
+- Models evolutionary pressure: heavily hunted species become prolific breeders
+
+### Results (1000 ticks)
+| Metric | Before fixes | After fixes |
+|---|---|---|
+| Living species | 165 | **375** |
+| Total population | 96K | **68K** |
+| Food chain pairs | 23,987 | **22,033** |
+| Caterpie eats Torterra | Yes | **No** |
+| Torterra population | extinct | **318 (food 0.98)** |
+| Pikachu population | extinct | **307** |
+
 ### Next steps
 - Build FastAPI REST layer
 - Docker Compose orchestration
