@@ -205,6 +205,41 @@ Queried alive vs extinct species and found the smoking gun:
 | Torterra population | extinct | **318 (food 0.98)** |
 | Pikachu population | extinct | **307** |
 
+---
+
+## 2026-03-17 — Base-Form Reproduction, Grazing & Producer Resilience
+
+### Problems fixed
+
+**1. Gardevoir was cloning herself**
+- Old: Gardevoir reproduces → more Gardevoirs (wrong)
+- New: Gardevoir reproduces → **Ralts is born** (correct)
+- Built `base_form` map by walking evolution chains backwards
+- Babies inherit parent's biome, start at 0.8 food satiation
+
+**2. 76% of herbivores had no food source**
+- Primary consumers (482 species) had no prey in the food chain — they just starved
+- Added **grazing mechanic**: herbivores passively feed on producer biomass in their biome
+- Added **decomposer scavenging**: feed on dead organic matter (flat food gain)
+- Secondary consumers/apex with no prey get a small scavenge bonus too
+
+**3. Producers (grass types) dying at 88% rate**
+- Only 12/103 producers survived — too many predators, not enough resilience
+- Added **plant regrowth**: producers regenerate small population each tick (capped by biome capacity)
+- Added **seed dispersal**: 2x base reproduction rate for producers
+- Added **faster photosynthesis**: 0.15 food regen (up from 0.10)
+
+### Results (1000 ticks)
+| Metric | Before | After |
+|---|---|---|
+| Living species | 375 | **460** |
+| Total population | 68K | **82K** |
+| Producer survival | 12% | **39%** |
+| Species-biome pairs | 621 (declining) | **870 (stable)** |
+| Equilibrium reached? | No | **Yes (~tick 600)** |
+
+Key survivors: Dratini 407, Rowlet 316, Riolu 283, Turtwig 258, Ralts 153, Bulbasaur 107, Eevee 67, Snorlax 42
+
 ### Next steps
 - Build FastAPI REST layer
 - Docker Compose orchestration

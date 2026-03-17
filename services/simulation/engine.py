@@ -38,6 +38,7 @@ class SimulationEngine:
         self.prey_of = {}          # prey_id -> [predator_id]
         self.predator_count = {}   # pokemon_id -> number of predators targeting it
         self.evolution_map = {}    # from_pokemon_id -> [(to_pokemon_id, min_pop, order)]
+        self.base_form = {}        # pokemon_id -> base form pokemon_id (for reproduction)
         self.biome_capacity = {}
         self.legendaries = set()   # pokemon_ids that are legendary/mythical (immortal)
         self.state = {}            # (pokemon_id, biome_id) -> {population, food_satiation, health, ticks_stable}
@@ -85,8 +86,20 @@ class SimulationEngine:
             SELECT from_pokemon_id, to_pokemon_id, min_population, evolution_order
             FROM evolution_chains
         """)
+        prevo_map = {}  # to_id -> from_id (reverse lookup)
         for from_id, to_id, min_pop, order in cur.fetchall():
             self.evolution_map.setdefault(from_id, []).append((to_id, min_pop, order))
+            prevo_map[to_id] = from_id
+
+        # Build base_form map: walk backwards to find the first form
+        # Gardevoir -> Kirlia -> Ralts, so base_form[gardevoir] = ralts
+        for pokemon_id in self.sim_params:
+            pid = pokemon_id
+            while pid in prevo_map:
+                pid = prevo_map[pid]
+            if pid != pokemon_id:
+                self.base_form[pokemon_id] = pid
+            # else: already a base form or no evo line, reproduces as itself
 
         # Biome capacities
         cur.execute("SELECT id, carrying_capacity FROM biomes")
@@ -211,15 +224,28 @@ class SimulationEngine:
         # Track populations before this tick for stability check
         prev_populations = {k: v["population"] for k, v in self.state.items()}
 
-        # --- Phase 1: Food regeneration (producers) ---
+        # --- Phase 1: Food regeneration & regrowth (producers) ---
         for key, state in self.state.items():
             if state["population"] <= 0:
                 continue
             pokemon_id = key[0]
             trophic = self.trophic_levels.get(pokemon_id)
             if trophic == "producer":
-                # Producers photosynthesize — food regenerates toward 1.0
-                state["food_satiation"] = min(1.0, state["food_satiation"] + 0.1)
+                # Producers photosynthesize — food regenerates quickly
+                state["food_satiation"] = min(1.0, state["food_satiation"] + 0.15)
+
+                # Regrowth: plants regenerate population even after being grazed
+                # Like grass regrowing — but only if below their niche share
+                biome_id = key[1]
+                biome_cap = self.biome_capacity.get(biome_id, 10000)
+                biome_total = sum(
+                    s["population"] for k, s in self.state.items()
+                    if k[1] == biome_id and s["population"] > 0
+                )
+                if state["population"] > 0 and state["food_satiation"] > 0.5 and biome_total < biome_cap:
+                    # Small fixed regrowth, not percentage-based
+                    regrowth = max(1, min(5, int(state["population"] * 0.03)))
+                    state["population"] += regrowth
 
         # --- Phase 2: Metabolism (everyone gets hungrier, except legendaries) ---
         for key, state in self.state.items():
@@ -241,6 +267,48 @@ class SimulationEngine:
                 metabolism *= (1.0 - scavenge_bonus * 0.5)
 
             state["food_satiation"] = max(0.0, state["food_satiation"] - metabolism)
+
+        # --- Phase 2b: Grazing & Scavenging ---
+        # Herbivores (primary consumers with no prey) graze on biome vegetation
+        # Decomposers feed on dead organic matter
+        # Food gained scales with how many producers are in the biome
+        for key, state in self.state.items():
+            if state["population"] <= 0:
+                continue
+            pokemon_id, biome_id = key
+            if pokemon_id in self.legendaries:
+                continue
+
+            trophic = self.trophic_levels.get(pokemon_id)
+            has_prey = pokemon_id in self.food_chain and len(self.food_chain[pokemon_id]) > 0
+
+            if trophic == "primary_consumer" or (trophic in ("decomposer",) and not has_prey):
+                # Count producer biomass in this biome (vegetation to graze on)
+                producer_pop = sum(
+                    s["population"] for k, s in self.state.items()
+                    if k[1] == biome_id and s["population"] > 0
+                    and self.trophic_levels.get(k[0]) == "producer"
+                )
+                biome_total = sum(
+                    s["population"] for k, s in self.state.items()
+                    if k[1] == biome_id and s["population"] > 0
+                )
+                # More vegetation = more food available for grazers
+                vegetation_ratio = producer_pop / max(1, biome_total)
+
+                if trophic == "primary_consumer":
+                    # Herbivores graze: food gain based on vegetation abundance
+                    # With good vegetation (>20%), grazers recover well
+                    graze_gain = min(0.15, vegetation_ratio * 0.5)
+                    state["food_satiation"] = min(1.0, state["food_satiation"] + graze_gain)
+                elif trophic == "decomposer":
+                    # Decomposers feed on dead matter — always some available
+                    # Less food than grazing but more reliable
+                    state["food_satiation"] = min(1.0, state["food_satiation"] + 0.08)
+
+            # Secondary consumers / apex with no prey can also scavenge a little
+            elif trophic in ("secondary_consumer", "apex_predator") and not has_prey:
+                state["food_satiation"] = min(1.0, state["food_satiation"] + 0.04)
 
         # --- Phase 3: Predation (with prey-switching & saturation) ---
         encounter_chance = self.config["predation_encounter_chance"]
@@ -389,8 +457,9 @@ class SimulationEngine:
                 events.append(("extinction", pokemon_id, biome_id,
                                f"Population reached 0 in biome"))
 
-        # --- Phase 5: Reproduction ---
+        # --- Phase 5: Reproduction (babies are base forms) ---
         repro_threshold = self.config["reproduction_food_threshold"]
+        pending_births = []  # (baby_pokemon_id, biome_id, count)
 
         for key, state in self.state.items():
             if state["population"] <= 0:
@@ -423,29 +492,30 @@ class SimulationEngine:
                 continue
 
             # Logistic growth: reproduction slows as species dominates biome
-            # A species can grow beyond its "fair share" but reproduction drops
             num_species_in_biome = sum(
                 1 for k, s in self.state.items()
                 if k[1] == biome_id and s["population"] > 0
             )
             species_niche = biome_cap / max(1, num_species_in_biome)
-            # Allow species to grow up to 3x their fair share before reproduction stops
             niche_saturation = state["population"] / max(1, species_niche * 3)
-            # Growth factor: 1.0 at low pop, approaches 0 at 3x niche
             growth_factor = max(0.0, 1.0 - niche_saturation)
 
             # Birth rate scales with population and repro_rate
             base_birth = min(0.5, params["repro_rate"] / 100.0)
 
+            # Producer seed dispersal: plants reproduce more prolifically
+            # They're the foundation of the food chain and need to sustain grazers
+            trophic = self.trophic_levels.get(pokemon_id)
+            if trophic == "producer":
+                base_birth *= 2.0  # plants spread seeds everywhere
+
             # Prey-pressure bonus: species with many predators breed faster
-            # Models evolutionary pressure — hunted species become prolific breeders
             num_predators = self.predator_count.get(pokemon_id, 0)
             if num_predators > 10:
-                # Up to 2x birth rate for heavily hunted species (30+ predators)
                 prey_pressure_bonus = 1.0 + min(1.0, (num_predators - 10) / 20.0)
                 base_birth *= prey_pressure_bonus
 
-            birth_rate = min(0.6, base_birth) * growth_factor
+            birth_rate = min(0.7, base_birth) * growth_factor
             if birth_rate <= 0.001:
                 continue
 
@@ -454,12 +524,27 @@ class SimulationEngine:
                 if random.random() < birth_rate:
                     births += 1
 
-            state["population"] += births
+            if births > 0:
+                # Babies are the base form of the evolution line
+                # Gardevoir reproduces -> Ralts is born
+                baby_id = self.base_form.get(pokemon_id, pokemon_id)
+                pending_births.append((baby_id, biome_id, births))
 
-            # Population boom detection
-            if births > 20 and births > state["population"] * 0.3:
-                events.append(("population_boom", pokemon_id, biome_id,
-                               f"Rapid growth: {births} births"))
+                if births > 20 and births > state["population"] * 0.3:
+                    events.append(("population_boom", pokemon_id, biome_id,
+                                   f"Rapid growth: {births} births"))
+
+        # Apply births (may create new state entries for base forms)
+        for baby_id, biome_id, count in pending_births:
+            baby_key = (baby_id, biome_id)
+            if baby_key not in self.state:
+                self.state[baby_key] = {
+                    "population": 0,
+                    "food_satiation": 0.8,
+                    "health": 100.0,
+                    "ticks_stable": 0,
+                }
+            self.state[baby_key]["population"] += count
 
         # --- Phase 6: Evolution ---
         base_evo_rate = self.config.get("base_evolution_rate", 0.02)
