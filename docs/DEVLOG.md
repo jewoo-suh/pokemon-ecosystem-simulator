@@ -113,3 +113,56 @@
 - Build FastAPI REST layer
 - Docker Compose orchestration
 - Phase 2: Frontend visualization with time scrubbing
+
+---
+
+## 2026-03-17 — Biodiversity Mechanics & Simulation Tuning
+
+### Problem
+The simulation converged to a winner-take-all state within 500 ticks. 9 species (Rattata, Caterpie, etc.) filled entire biomes to carrying capacity (~10K each), driving 75% of species extinct. Total population hit 96K but only 165 species survived.
+
+### Root cause
+1. **No per-species density limits** — a single species could fill an entire biome
+2. **Reproduction only checked total biome cap** — no intraspecific competition
+3. **Predators didn't focus on abundant prey** — rare and common prey hunted equally
+
+### Three new mechanics added
+
+**1. Logistic Growth (Reproduction)**
+- Each species has a "niche share" = biome_capacity / num_species_in_biome
+- Reproduction rate drops as species approaches 3x its niche share
+- `growth_factor = max(0.0, 1.0 - population / (niche * 3))`
+
+**2. Intraspecific Competition (Mortality)**
+- Species occupying >25% of a biome face extra mortality from disease/territorial pressure
+- Penalty scales with dominance: `1.0 + ((share - 0.25) / 0.75)^0.7 * 2.0`
+- Prevents any single species from monopolizing a biome
+
+**3. Prey-Switching (Predation)**
+- Predators encounter abundant prey more frequently
+- Abundance multiplier: `1.0 + (prey_share * 5.0)`
+- Species at 10% of biome get hunted ~1.5x more; at 50% get hunted ~3.5x more
+- Acts as natural population control on dominant species
+
+### Tuning iterations
+| Version | Living species | Total pop | Max species | Notes |
+|---|---|---|---|---|
+| v1 (no biodiversity) | 165 | 96,664 | 11,433 | Winner-take-all |
+| v2 (15% threshold) | 427 | 27,822 | 580 | Too aggressive, pop declining |
+| v3 (25% threshold, 3x niche) | **412** | **66,838** | **1,582** | Balanced |
+
+### Also fixed
+- `RuntimeError: dictionary changed size during iteration` in evolution phase — collected pending evolutions into a list before applying
+
+### Results (500 ticks, v3)
+- 412 living species (vs 165 before)
+- Max species pop 1,582 (Stunfisk) vs 11,433 (Rattata)
+- Top species is only 2.4% of total population (vs 11.8%)
+- Biomes hold 5-10K each with 44-125 species per biome
+- Pikachu: 301 pop, Gardevoir: 30 pop, Mewtwo/Rayquaza: immortal
+- Population slowly declining (80K→67K) — may need more ticks to stabilize
+
+### Next steps
+- Build FastAPI REST layer
+- Docker Compose orchestration
+- Phase 2: Frontend visualization with time scrubbing

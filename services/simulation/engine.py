@@ -230,8 +230,14 @@ class SimulationEngine:
                 continue
             state["food_satiation"] = max(0.0, state["food_satiation"] - params["metabolism"])
 
-        # --- Phase 3: Predation ---
+        # --- Phase 3: Predation (with prey-switching) ---
         encounter_chance = self.config["predation_encounter_chance"]
+
+        # Pre-compute biome populations for prey-switching
+        biome_prey_pops = {}  # biome_id -> {prey_id: population}
+        for (pid, bid), s in self.state.items():
+            if s["population"] > 0:
+                biome_prey_pops.setdefault(bid, {})[pid] = s["population"]
 
         for key, state in self.state.items():
             if state["population"] <= 0:
@@ -244,6 +250,9 @@ class SimulationEngine:
             prey_list = self.food_chain.get(pokemon_id, [])
             if not prey_list:
                 continue
+
+            # Get total prey available in this biome for prey-switching
+            biome_pops = biome_prey_pops.get(biome_id, {})
 
             for prey_id, base_prob in prey_list:
                 # Legendaries can't be hunted
@@ -258,8 +267,16 @@ class SimulationEngine:
                 if not prey_params:
                     continue
 
+                # Prey-switching: predators focus on abundant prey
+                # More abundant prey = higher encounter multiplier
+                prey_pop = prey_state["population"]
+                biome_total = sum(biome_pops.values())
+                prey_abundance = prey_pop / max(1, biome_total)
+                # Abundant species (>10% of biome) get hunted 2-3x more
+                abundance_mult = 1.0 + prey_abundance * 5.0
+
                 # Number of encounters this tick
-                encounters = int(state["population"] * encounter_chance)
+                encounters = int(state["population"] * encounter_chance * abundance_mult)
                 if encounters <= 0:
                     continue
 
@@ -305,7 +322,7 @@ class SimulationEngine:
             if state["food_satiation"] < 0.3:
                 mortality *= food_scarcity_mult
 
-            # Carrying capacity pressure
+            # Carrying capacity pressure (biome-level)
             biome_cap = self.biome_capacity.get(biome_id, 10000)
             biome_total = sum(
                 s["population"] for k, s in self.state.items()
@@ -314,6 +331,14 @@ class SimulationEngine:
             if biome_total > biome_cap:
                 overcrowding = biome_total / biome_cap
                 mortality *= overcrowding
+
+            # Intraspecific competition: species that dominate a biome
+            # face disease/territorial pressure (density-dependent mortality)
+            species_share = state["population"] / max(1, biome_total)
+            if species_share > 0.25:
+                # Gentle penalty above 25% biome share, ramps up toward monopoly
+                dominance_penalty = 1.0 + ((species_share - 0.25) / 0.75) ** 0.7 * 2.0
+                mortality *= dominance_penalty
 
             # Apply deaths
             deaths = 0
@@ -357,10 +382,23 @@ class SimulationEngine:
             if biome_total >= biome_cap:
                 continue
 
+            # Logistic growth: reproduction slows as species dominates biome
+            # A species can grow beyond its "fair share" but reproduction drops
+            num_species_in_biome = sum(
+                1 for k, s in self.state.items()
+                if k[1] == biome_id and s["population"] > 0
+            )
+            species_niche = biome_cap / max(1, num_species_in_biome)
+            # Allow species to grow up to 3x their fair share before reproduction stops
+            niche_saturation = state["population"] / max(1, species_niche * 3)
+            # Growth factor: 1.0 at low pop, approaches 0 at 3x niche
+            growth_factor = max(0.0, 1.0 - niche_saturation)
+
             # Birth rate scales with population and repro_rate
-            # But repro_rate is already quite high (e.g., Magikarp = 51)
-            # So we normalize: births = population * (repro_rate / 100)
-            birth_rate = min(0.5, params["repro_rate"] / 100.0)
+            birth_rate = min(0.5, params["repro_rate"] / 100.0) * growth_factor
+            if birth_rate <= 0.001:
+                continue
+
             births = 0
             for _ in range(state["population"]):
                 if random.random() < birth_rate:
@@ -376,8 +414,9 @@ class SimulationEngine:
         # --- Phase 6: Evolution ---
         base_evo_rate = self.config.get("base_evolution_rate", 0.02)
         evo_stability = int(self.config.get("evolution_stability_ticks", 50))
+        pending_evolutions = []  # collect to avoid mutating dict during iteration
 
-        for key, state in self.state.items():
+        for key, state in list(self.state.items()):
             if state["population"] <= 0:
                 continue
             pokemon_id, biome_id = key
@@ -398,7 +437,6 @@ class SimulationEngine:
             # Per-individual evolution chance
             evo_rate = base_evo_rate * (1.0 / max(0.1, params["evo_threshold"]))
 
-            evolved_total = 0
             for to_pokemon_id, min_pop, order in evolutions:
                 if state["population"] < min_pop:
                     continue
@@ -409,29 +447,31 @@ class SimulationEngine:
                         evolved += 1
 
                 if evolved > 0:
-                    # Cap to available population
                     evolved = min(evolved, state["population"])
                     state["population"] -= evolved
+                    pending_evolutions.append((to_pokemon_id, biome_id, evolved, state["food_satiation"], state["health"]))
 
-                    # Add to evolved form (create entry if needed)
-                    evo_key = (to_pokemon_id, biome_id)
-                    if evo_key not in self.state:
-                        self.state[evo_key] = {
-                            "population": 0,
-                            "food_satiation": state["food_satiation"],
-                            "health": state["health"],
-                            "ticks_stable": 0,
-                        }
-                    self.state[evo_key]["population"] += evolved
-                    evolved_total += evolved
-
-                    # Split evenly for branching evolutions
                     if len(evolutions) > 1:
                         break  # only evolve into one form per tick
 
-            if evolved_total > 5:
+        # Apply evolutions
+        evolved_counts = {}
+        for to_pokemon_id, biome_id, count, food, health in pending_evolutions:
+            evo_key = (to_pokemon_id, biome_id)
+            if evo_key not in self.state:
+                self.state[evo_key] = {
+                    "population": 0,
+                    "food_satiation": food,
+                    "health": health,
+                    "ticks_stable": 0,
+                }
+            self.state[evo_key]["population"] += count
+            evolved_counts[evo_key] = evolved_counts.get(evo_key, 0) + count
+
+        for (pokemon_id, biome_id), total in evolved_counts.items():
+            if total > 5:
                 events.append(("evolution_wave", pokemon_id, biome_id,
-                               f"{evolved_total} evolved"))
+                               f"{total} evolved"))
 
         # --- Phase 7: Migration ---
         migration_pairs = []  # collect migrations to apply after iteration
