@@ -13,8 +13,19 @@ let useStatic = null; // null = not yet determined
 
 async function detectMode() {
   if (useStatic !== null) return;
+
+  // On GitHub Pages (or any non-localhost), always use static
+  if (typeof window !== 'undefined' && !window.location.hostname.includes('localhost')) {
+    useStatic = true;
+    console.log('[data] Static mode (not localhost)');
+    return;
+  }
+
   try {
-    const res = await fetch(`${API}/simulation/status`, { signal: AbortSignal.timeout(2000) });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${API}/simulation/status`, { signal: controller.signal });
+    clearTimeout(timer);
     if (res.ok) {
       useStatic = false;
       console.log('[data] Using live API');

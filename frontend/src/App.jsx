@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import StardewMap from './components/StardewMap';
+import IsometricScene from './components/IsometricScene';
 import Sidebar from './components/Sidebar';
 import TimelineBar from './components/TimelineBar';
 
@@ -20,7 +20,7 @@ function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
-      <StardewMap
+      <IsometricScene
         onSpeciesClick={(dot) => setSelectedSpecies(dot)}
         onTickLoaded={setCurrentTick}
         animFrame={animFrame}

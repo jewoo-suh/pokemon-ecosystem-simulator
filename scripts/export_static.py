@@ -43,12 +43,9 @@ def export_map():
 
 
 def export_status():
-    """Export /simulation/status"""
+    """Export /simulation/status — always shows tick 0 (fresh start for static site)"""
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute("SELECT key, value FROM simulation_metadata")
-    metadata = {r["key"]: r["value"] for r in cur.fetchall()}
 
     cur.execute("SELECT key, value FROM simulation_config")
     config = {r["key"]: float(r["value"]) for r in cur.fetchall()}
@@ -61,8 +58,8 @@ def export_status():
     pop = cur.fetchone()
 
     data = {
-        "current_tick": int(metadata.get("current_tick", 0)),
-        "status": metadata.get("status", "stopped"),
+        "current_tick": 0,
+        "status": "stopped",
         "living_species": pop["living_species"],
         "total_population": pop["total_population"],
         "config": config,
@@ -344,20 +341,17 @@ def export_species():
 
 
 def export_animation_frames():
-    """Run a short simulation and export frames for playback."""
+    """Re-initialize simulation from tick 0 and export frames for playback."""
     from engine import SimulationEngine
     import numpy as np
 
-    print("  Running 100-tick simulation for animation frames...")
+    print("  Re-initializing simulation from tick 0...")
     engine = SimulationEngine()
     engine.load_data()
-    engine._load_state()
+    engine.initialize_world()
     engine._build_arrays()
 
-    cur = engine.conn.cursor()
-    cur.execute("SELECT value FROM simulation_metadata WHERE key = 'current_tick'")
-    current_tick = int(cur.fetchone()[0])
-    cur.close()
+    current_tick = 0
 
     # Name/trophic lookups
     name_lookup = {}
@@ -374,7 +368,7 @@ def export_animation_frames():
         biome_names[row[0]] = row[1]
     cur.close()
 
-    ticks = 100
+    ticks = 200  # 2 full years of seasonal data
     tick_pops = []
 
     for i in range(ticks):
@@ -444,6 +438,46 @@ def write_json(filename, data):
         json.dump(data, f, separators=(",", ":"))  # compact JSON
 
 
+def export_sprites():
+    """Download Pokemon sprites for all active species."""
+    import urllib.request
+    import time as _time
+
+    sprites_dir = os.path.join(OUTPUT_DIR, "sprites")
+    os.makedirs(sprites_dir, exist_ok=True)
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT pokemon_id FROM simulation_state WHERE population > 0")
+    active_ids = [r[0] for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+
+    # Check which sprites we already have
+    existing = set()
+    for f in os.listdir(sprites_dir):
+        if f.endswith(".png"):
+            existing.add(int(f.replace(".png", "")))
+
+    to_download = [pid for pid in active_ids if pid not in existing]
+    print(f"  sprites: {len(active_ids)} needed, {len(existing)} cached, {len(to_download)} to download")
+
+    for i, pid in enumerate(to_download):
+        url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{pid}.png"
+        dest = os.path.join(sprites_dir, f"{pid}.png")
+        try:
+            urllib.request.urlretrieve(url, dest)
+        except Exception as e:
+            print(f"    Failed to download sprite {pid}: {e}")
+
+        # Rate limit: small delay every 20 downloads
+        if (i + 1) % 20 == 0:
+            print(f"    Downloaded {i + 1}/{len(to_download)}...")
+            _time.sleep(0.5)
+
+    print(f"  sprites: {len(os.listdir(sprites_dir))} total sprites cached")
+
+
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     print("Exporting static data for GitHub Pages...\n")
@@ -454,14 +488,16 @@ def main():
     export_food_chain()
     export_stats()
     export_species()
+    export_sprites()
     export_animation_frames()
 
     # Calculate total size
     total = 0
-    for f in os.listdir(OUTPUT_DIR):
-        size = os.path.getsize(os.path.join(OUTPUT_DIR, f))
-        total += size
-    print(f"\nDone! {len(os.listdir(OUTPUT_DIR))} files, {total / 1024:.0f} KB total")
+    for root, dirs, files in os.walk(OUTPUT_DIR):
+        for f in files:
+            total += os.path.getsize(os.path.join(root, f))
+    file_count = sum(len(files) for _, _, files in os.walk(OUTPUT_DIR))
+    print(f"\nDone! {file_count} files, {total / 1024 / 1024:.1f} MB total")
     print(f"Output: {OUTPUT_DIR}")
 
 

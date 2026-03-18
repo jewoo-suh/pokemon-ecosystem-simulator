@@ -69,40 +69,41 @@ function updateAgent(a, dtMs, allAgents, spatialGrid, gridW, gridH, foodChainPre
   const dt = dtMs / 1000;
 
   // ---- Tuning constants (all in pixels/second) ----
-  const WANDER_FORCE = 120;      // random walk strength (strong enough to see movement)
-  const HOME_PULL = 15;          // pull back toward spawn area
-  const HOME_RADIUS = 80;        // start pulling beyond this distance
+  // Map is 2400x2400px. At default zoom, need visible movement.
+  const WANDER_FORCE = 400;       // strong random walk
+  const HOME_PULL = 25;           // pull back toward spawn area
+  const HOME_RADIUS = 120;        // start pulling beyond this distance
 
   // Flocking (same species)
-  const FLOCK_RADIUS = 100;      // notice same-species within this range
-  const SEP_RADIUS = 16;         // too-close separation distance
-  const COHESION = 12;           // pull toward group center
-  const SEPARATION = 40;         // push away from too-close neighbors
-  const ALIGNMENT = 8;           // match group velocity
+  const FLOCK_RADIUS = 150;       // notice same-species within this range
+  const SEP_RADIUS = 20;          // too-close separation distance
+  const COHESION = 25;            // strong pull toward group center
+  const SEPARATION = 80;          // push away from too-close neighbors
+  const ALIGNMENT = 15;           // match group velocity
 
   // Predator-prey
-  const CHASE_RADIUS = 120;      // predator detection range
-  const CHASE_FORCE = 50;        // predator chase strength
-  const FLEE_FORCE = 70;         // prey flee strength (prey flee faster)
+  const CHASE_RADIUS = 180;       // predator detection range
+  const CHASE_FORCE = 120;        // predator chase strength
+  const FLEE_FORCE = 160;         // prey flee strength (prey flee faster)
 
   // Movement
-  const MAX_SPEED_WALK = 25;     // pixels per second
-  const MAX_SPEED_FLEE = 45;     // noticeably faster when fleeing
-  const DAMPING = 0.85;          // less damping = more fluid movement
+  const MAX_SPEED_WALK = 60;      // pixels per second (visible at any zoom)
+  const MAX_SPEED_FLEE = 110;     // noticeably faster when fleeing
+  const DAMPING = 0.90;           // moderate damping for smooth movement
 
   // ---- State machine (timers in seconds) ----
   a.stateTimer -= dt;
   if (a.stateTimer <= 0 && a.state !== 'flee') {
     const roll = Math.random();
-    if (roll < 0.65) {
+    if (roll < 0.75) {
       a.state = 'walk';
-      a.stateTimer = 4 + Math.random() * 8; // walk for 4-12 seconds
-    } else if (roll < 0.82) {
+      a.stateTimer = 5 + Math.random() * 10; // walk for 5-15 seconds
+    } else if (roll < 0.88) {
       a.state = 'idle';
-      a.stateTimer = 1.5 + Math.random() * 2.5; // brief pause 1.5-4s
+      a.stateTimer = 1 + Math.random() * 2; // brief pause 1-3s
     } else {
       a.state = 'eat';
-      a.stateTimer = 1.5 + Math.random() * 2; // eat 1.5-3.5s
+      a.stateTimer = 1 + Math.random() * 1.5; // eat 1-2.5s
     }
   }
 
@@ -242,13 +243,27 @@ function updateAgent(a, dtMs, allAgents, spatialGrid, gridW, gridH, foodChainPre
 // ============================================================
 
 const spriteCache = {};
+let spritesLoadedCount = 0;
+let spritesFailedCount = 0;
+
 function loadSprite(id) {
   if (spriteCache[id]) return spriteCache[id];
   const img = new Image();
   img.crossOrigin = 'anonymous';
-  img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
   spriteCache[id] = { img, loaded: false };
-  img.onload = () => { spriteCache[id].loaded = true; };
+  img.onload = () => {
+    spriteCache[id].loaded = true;
+    spritesLoadedCount++;
+    if (spritesLoadedCount % 50 === 0) {
+      console.log(`[Sprites] ${spritesLoadedCount} loaded, ${spritesFailedCount} failed`);
+    }
+  };
+  img.onerror = () => {
+    spritesFailedCount++;
+  };
+  // Use local sprites (bundled in /data/sprites/) with GitHub fallback
+  const basePath = import.meta.env.BASE_URL || '/';
+  img.src = `${basePath}data/sprites/${id}.png`;
   return spriteCache[id];
 }
 
@@ -346,6 +361,11 @@ export default function StardewMap({ onSpeciesClick, onTickLoaded, animFrame }) 
       // Build initial agents from biome species data
       return getAllBiomeDetails()
         .then(biomeDetails => {
+          console.log('[StardewMap] biomeDetails:', biomeDetails.length, 'biomes');
+          if (biomeDetails.length > 0) {
+            console.log('[StardewMap] first biome:', biomeDetails[0].name, 'species:', biomeDetails[0].species?.length);
+          }
+
           const biomeCells = {};
           for (let y = 0; y < mapData.height; y++) {
             for (let x = 0; x < mapData.width; x++) {
@@ -426,6 +446,8 @@ export default function StardewMap({ onSpeciesClick, onTickLoaded, animFrame }) 
             }
           }
 
+          console.log('[StardewMap] Built', agents.length, 'agents');
+
           // Cap agents
           if (agents.length > MAX_AGENTS) {
             const step = agents.length / MAX_AGENTS;
@@ -470,9 +492,15 @@ export default function StardewMap({ onSpeciesClick, onTickLoaded, animFrame }) 
     let animId;
     let lastTime = performance.now();
 
+    let frameCount = 0;
     function gameLoop(now) {
       const dt = Math.min(now - lastTime, 50); // cap at 50ms
       lastTime = now;
+      frameCount++;
+      if (frameCount === 120) {
+        const a = agentsRef.current[0];
+        if (a) console.log(`[GameLoop] agent0: x=${a.x.toFixed(1)} y=${a.y.toFixed(1)} vx=${a.vx.toFixed(2)} vy=${a.vy.toFixed(2)} state=${a.state}`);
+      }
 
       const { width: cw, height: ch } = canvas.getBoundingClientRect();
       canvas.width = cw * window.devicePixelRatio;
@@ -532,11 +560,18 @@ export default function StardewMap({ onSpeciesClick, onTickLoaded, animFrame }) 
       // Draw agents
       for (const a of agents) {
         const sprite = spriteCache[a.speciesId];
-        if (!sprite || !sprite.loaded) continue;
-
         const bob = Math.sin(a.bobPhase) * 1.5;
         const drawX = a.x - SPRITE_SIZE / 2;
         const drawY = a.y - SPRITE_SIZE + bob;
+
+        // If sprite not loaded yet, draw colored circle as fallback
+        if (!sprite || !sprite.loaded) {
+          ctx.fillStyle = '#e88';
+          ctx.beginPath();
+          ctx.arc(a.x, a.y - SPRITE_SIZE * 0.3 + bob, SPRITE_SIZE * 0.3, 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
 
         ctx.save();
 
