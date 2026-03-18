@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-
-const API = 'http://localhost:8000';
+import { runAnimationFrames } from '../data';
 
 export default function TimelineBar({ currentTick, onTicksRun, onFrame }) {
   const [tickCount, setTickCount] = useState(50);
@@ -58,8 +57,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame }) {
     setFrameIdx(0);
     setPlaying(false);
     try {
-      const res = await fetch(`${API}/simulation/run-frames?ticks=${tickCount}`, { method: 'POST' });
-      const data = await res.json();
+      const data = await runAnimationFrames(tickCount);
       setCatalog(data.species);
       setFrames(data.frames);
       setFrameIdx(0);

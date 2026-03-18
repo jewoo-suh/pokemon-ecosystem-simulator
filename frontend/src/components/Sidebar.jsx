@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const API = 'http://localhost:8000';
+import { getStatsOverview, getStatsTrophic, getSpeciesDetail } from '../data';
 
 export default function Sidebar({ selectedSpecies, onClose }) {
   const [details, setDetails] = useState(null);
@@ -9,16 +8,14 @@ export default function Sidebar({ selectedSpecies, onClose }) {
 
   // Load overview stats
   useEffect(() => {
-    fetch(`${API}/stats/overview`).then(r => r.json()).then(setOverview);
-    fetch(`${API}/stats/trophic`).then(r => r.json()).then(setTrophic);
+    getStatsOverview().then(setOverview);
+    getStatsTrophic().then(setTrophic);
   }, []);
 
   // Load species details when selected
   useEffect(() => {
     if (!selectedSpecies) { setDetails(null); return; }
-    fetch(`${API}/species/${selectedSpecies.id}`)
-      .then(r => r.json())
-      .then(setDetails);
+    getSpeciesDetail(selectedSpecies.id).then(setDetails);
   }, [selectedSpecies]);
 
   const trophicColors = {
