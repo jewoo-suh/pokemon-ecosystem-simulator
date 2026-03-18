@@ -34,6 +34,7 @@ def main():
             print("\nNo existing state found, initializing fresh world...")
             engine.initialize_world()
         else:
+            engine._build_arrays()
             total_pop = sum(s["population"] for s in engine.state.values())
             print(f"\nResuming: {len(engine.state)} species-biome pairs, {total_pop} total pop")
 

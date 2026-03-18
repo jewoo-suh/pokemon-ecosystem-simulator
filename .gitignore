@@ -41,5 +41,11 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
+# Node.js
+node_modules/
+
+# Generated map files (regeneratable via map generator)
+services/map_generator/maps/
+
 # Raw data files (regeneratable via data loader)
 services/data_loader/data/

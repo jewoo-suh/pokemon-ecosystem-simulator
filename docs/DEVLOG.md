@@ -244,3 +244,242 @@ Key survivors: Dratini 407, Rowlet 316, Riolu 283, Turtwig 258, Ralts 153, Bulba
 - Build FastAPI REST layer
 - Docker Compose orchestration
 - Phase 2: Frontend visualization with time scrubbing
+
+---
+
+## 2026-03-17 — Performance Overhaul, Biome Biomass & Death Pool
+
+### Problems fixed
+
+**1. biome_total computed 6+ times per tick (O(n²) waste)**
+- Every phase scanned all state entries to sum biome populations
+- Pre-computed `biome_totals`, `biome_species_counts`, `biome_producer_pops` once at tick start
+- Single O(n) pass replaces 6+ redundant O(n) scans
+
+**2. Per-individual dice rolls (O(population) per event)**
+- Predation, mortality, reproduction, and evolution all looped `for _ in range(pop)`
+- Replaced with `_binomial()` helper: exact rolls for n<20, normal approximation for n≥20
+- 1000 ticks: ~200s+ → **83s** (2.4x faster)
+
+**3. Buggy metabolism scavenge formula**
+- Old: `scavenge_bonus = 1.0 - (pop/20)*0.5; metabolism *= (1.0 - scavenge_bonus*0.5)` — convoluted double-reduction
+- New: `metabolism *= 0.5 + 0.5 * (pop / 20.0)` — clean linear scale (pop 1 = 50% metabolism, pop 20+ = full)
+
+**4. Grazing excluded bug herbivores with prey options**
+- Bug types like Caterpie had food chain prey (grass types) but were too weak to actually catch them
+- Old `has_prey` check excluded them from grazing → starvation
+- Fixed: ALL primary consumers now graze regardless of prey options. Hunting is supplemental.
+
+**5. "Free food" epidemic — decomposers and prey-less carnivores**
+- Decomposers got flat +0.08/tick from nowhere
+- Prey-less carnivores (Snorlax etc.) got flat +0.04/tick from nowhere
+- **Decomposers now feed on death pool**: total predation kills + mortality deaths per biome, shared among all decomposers. No deaths = no food.
+- **Prey-less carnivores now forage opportunistically**: 30% of herbivore grazing rate, scaled by biome biomass. Snorlax in a forest finds berries; Snorlax on a mountain starves.
+
+**6. Biome biomass factor (new mechanic)**
+- Each biome has a biomass multiplier affecting grazing/foraging rates
+- Forest (1.5), grassland (1.3), waters-edge (1.2), sea (1.0), rare (0.8), mountain (0.7), rough-terrain (0.6), urban (0.5), cave (0.4)
+- Creates real biome differentiation: lush biomes sustain more herbivores, harsh biomes are survival challenges
+- Added `biomass_factor` column to biomes table (migration 005)
+
+### Results (1000 ticks)
+| Metric | Before (v9) | After (v10) |
+|---|---|---|
+| Living species | 460 | **495** |
+| Total pop | 82K | **78K** |
+| Species-biome pairs | 870 | **922** |
+| Performance (1000 ticks) | ~200s+ | **83s** |
+| Snorlax (forest) food | 1.0 (free) | 1.0 (earned — foraging) |
+| Snorlax (mountain) food | 1.0 (free) | 0.0 (starving — harsh biome) |
+| Eevee (cave) food | 1.0 | 0.50 (cave is harsh) |
+
+### Files created/modified
+- `services/simulation/engine.py` — All 6 fixes above
+- `db/migrations/005_biome_biomass.sql` — Biome biomass factor column
+
+---
+
+## 2026-03-17 — Type-Biome Affinity (Habitat Specialization)
+
+### Problem
+Biome biomass alone made caves universally terrible and forests universally great. A Rock Pokemon adapted to caves shouldn't struggle as much as a Grass type there.
+
+### Solution: Type-biome affinity multiplier
+- 56 type-biome affinity entries (18 types × 9 biomes, only non-1.0 stored)
+- Effective biomass = `biome_biomass × type_affinity`
+- Rock in cave: `0.5 × 1.6 = 0.80` (adapted), Grass in cave: `0.5 × 0.6 = 0.30` (struggling)
+- Bug in forest: `1.3 × 1.5 = 1.95` (thriving), Ice in forest: `1.3 × 0.7 = 0.91` (uncomfortable)
+- Also moderated base biomass range: 0.5-1.3 (was 0.4-1.5)
+
+### Key affinities
+| Biome | Thrives | Struggles |
+|---|---|---|
+| Cave | rock 1.6, ground 1.4, dark 1.4, ghost 1.3 | grass 0.6, flying 0.6 |
+| Forest | bug 1.5, grass 1.4, fairy 1.3, normal 1.2 | ice 0.7, rock 0.8 |
+| Sea | water 1.6, ice 1.2 | fire 0.5, ground 0.5 |
+| Mountain | rock 1.5, flying 1.4, ice 1.3, dragon 1.3 | water 0.7 |
+| Urban | electric 1.4, steel 1.3, normal 1.3 | grass 0.7 |
+
+### Results (1000 ticks)
+- Cave: Dark types dominate (2691 pop), ghost types thrive (1647), rock/ground solid — no grass types survive
+- Forest: Grass dominates (7401 pop), bugs thrive (615), fairy/normal do well
+- Each biome has distinct type composition — real ecological niches
+
+### Files created/modified
+- `db/migrations/006_type_biome_affinity.sql` — Type-biome affinity table + data
+- `services/simulation/engine.py` — Load type affinity, compute effective biomass
+
+---
+
+## 2026-03-17 — Global Time Scale & Final Tuning (v11)
+
+### Problem
+48% extinction rate at 1000 ticks was too aggressive. Small populations would get 2-3 bad rolls in a row and spiral to 0 before recovering. Per-tick rates (metabolism, mortality, predation) made each tick too volatile.
+
+### Solution: Global time scale factor
+- Added `time_scale` config parameter (stored in `simulation_config`)
+- Scales metabolism, mortality, and predation encounter chance per tick
+- Reproduction left unscaled so species can recover
+- Effectively makes each tick a shorter time unit — less happens per tick, fewer death spirals
+
+### Tuning
+| time_scale | Living species | Survival rate | Pikachu | Eevee | Greninja |
+|---|---|---|---|---|---|
+| 1.0 | 493 | 48% | extinct | 71 | extinct |
+| 0.5 | 635 | 62% | 12 | 98 | extinct |
+| **0.3** | **840** | **82%** | **39** | **504** | **1** |
+
+### Final results (time_scale = 0.3, 1000 ticks)
+- **840 / 1025 species alive (82% survival)**
+- **84K total population** across 1432 species-biome pairs
+- Equilibrium still not fully reached at tick 1000 — gradual competitive exclusion ongoing
+- Trophic pyramid healthy: 282 primary consumers (52K), 130 secondary (17K), 103 producers (10K), 92 apex (941), 28 decomposers (3K)
+
+### Key species
+| Pokemon | Pop | Biomes | Notes |
+|---|---|---|---|
+| Eevee | 504 | 5 biomes | Ultimate generalist |
+| Magikarp | 261 | waters-edge | Water type thriving |
+| Geodude | 167 | mountain | Rock type at home |
+| Gastly | 154 | cave | Ghost in the dark |
+| Ralts | 141 | urban, grassland | Psychic city dweller |
+| Bulbasaur | 100 | grassland | Producer, full food |
+| Rattata | 56 | grassland | Normal type recovered |
+| Pikachu | 39 | forest | Electric mouse lives! |
+| Snorlax | 23 | forest, mountain | Foraging for berries |
+| Torterra | 18 | forest, grassland | Grass tank |
+| Greninja | 1 | waters-edge | Barely hanging on |
+| Mewtwo | 4 | rare | Immortal legend |
+| Rayquaza | 4 | rare | Immortal legend |
+
+### Files modified
+- `services/simulation/engine.py` — Added `time_scale` config, applied to metabolism/mortality/predation
+- `simulation_config` table — Added `time_scale = 0.3`
+
+---
+
+## 2026-03-17 — FastAPI REST Layer
+
+### What happened
+Built the full REST API layer using FastAPI + psycopg2. All endpoints tested and returning correct data.
+
+### Architecture
+- **FastAPI** with `uvicorn` — auto-generated interactive docs at `/docs`
+- **psycopg2 connection pool** (SimpleConnectionPool, 5 max) with `RealDictCursor` for dict responses
+- **6 route modules** under `services/api/routes/`
+- **CORS enabled** for frontend dev
+
+### Endpoints
+| Method | Path | Description |
+|---|---|---|
+| GET | `/species` | List all species (filterable by trophic level, type) |
+| GET | `/species/{id}` | Species detail with per-biome population breakdown |
+| GET | `/biomes` | All biomes with population/species counts |
+| GET | `/biomes/{id}` | Biome detail with species list and type breakdown |
+| GET | `/population/species/{id}` | Population time series (supports `resolution`, `by_biome`) |
+| GET | `/population/biome/{id}` | Biome population time series |
+| GET | `/simulation/status` | Current tick, config, living species |
+| POST | `/simulation/run?ticks=100` | Run N more ticks (blocks until done) |
+| GET | `/simulation/events` | Ecosystem events (filterable) |
+| GET | `/food-chain/{pokemon_id}` | Predators and prey for a species |
+| GET | `/food-chain` | Full food chain graph (nodes + edges, filterable by biome) |
+| GET | `/stats/overview` | Dashboard numbers (survival rate, top species/biome) |
+| GET | `/stats/trophic` | Population by trophic level |
+
+### How to run
+```bash
+cd services/api
+uvicorn main:app --reload --port 8000
+# Open http://localhost:8000/docs for interactive API explorer
+```
+
+### Files created
+- `services/api/main.py` — App entry point, CORS, router registration
+- `services/api/config.py` — DB connection config
+- `services/api/db.py` — Connection pool + cursor context manager
+- `services/api/requirements.txt` — FastAPI + uvicorn + psycopg2-binary
+- `services/api/routes/species.py` — Species endpoints
+- `services/api/routes/biomes.py` — Biome endpoints
+- `services/api/routes/population.py` — Time series endpoints
+- `services/api/routes/simulation.py` — Simulation control + events
+- `services/api/routes/food_chain.py` — Food chain graph
+- `services/api/routes/stats.py` — Aggregate stats
+
+---
+
+## 2026-03-17 — Perlin Noise Map & Spatial Migration
+
+### What happened
+Built a Perlin noise map generator that creates natural-looking terrain and derives biome adjacency for realistic migration. Migration is now spatial — Pokemon can only move between biomes that share a border on the map.
+
+### Map generation
+- **Layered simplex noise**: elevation (4 octaves) + moisture + urban noise
+- **Island effect**: elevation drops near edges to create ocean borders
+- **Biome assignment** from elevation × moisture:
+  - Low elevation → sea → waters-edge (shoreline)
+  - Mid elevation + high moisture → forest
+  - Mid elevation + low moisture → grassland
+  - High elevation → rough-terrain → mountain → cave (peaks)
+  - Urban scattered in lowlands, rare near mountain peaks
+- **Adjacency computed** from which biomes share borders on the grid
+- Maps saved as JSON (frontend) + adjacency written to DB (engine)
+
+### Biome distribution (seed 42, 200×200)
+| Biome | Coverage | Adjacent to |
+|---|---|---|
+| forest | 26.9% | grassland, mountain, rare, urban, waters-edge |
+| grassland | 24.1% | forest, mountain, rough-terrain, urban, waters-edge |
+| sea | 13.4% | waters-edge |
+| mountain | 9.7% | cave, forest, grassland, rare, rough-terrain |
+| waters-edge | 8.6% | forest, grassland, sea |
+| rough-terrain | 7.5% | grassland, mountain, urban |
+| cave | 6.9% | mountain |
+| urban | 2.0% | forest, grassland, rough-terrain |
+| rare | 0.9% | forest, mountain |
+
+### Modular design
+- Maps stored as JSON in `services/map_generator/maps/`
+- Each map has a seed — reproducible and swappable
+- `python generate_map.py --seed 42` generates a new map
+- Engine loads adjacency from DB — doesn't know which map made it
+- To swap maps: generate new one → re-run simulation
+- Frontend loads map via `GET /simulation/map`
+
+### Migration update
+- Old: Pokemon migrate to any biome they have habitat in (random teleportation)
+- New: Pokemon only migrate to **adjacent biomes** on the map
+- Fallback: if no adjacency data exists, all-to-all migration (backwards compatible)
+- Sea Pokemon stay in the sea (only adjacent to waters-edge)
+- Cave Pokemon can reach mountain but not directly to grassland
+
+### Files created/modified
+- `services/map_generator/generate_map.py` — Map generator with noise, adjacency, preview
+- `services/map_generator/maps/map_seed_42.json` — Current map data
+- `services/map_generator/maps/current_map.json` — Symlink for frontend
+- `services/map_generator/requirements.txt` — opensimplex, numpy, pillow
+- `services/simulation/engine.py` — Load adjacency, spatial migration
+- `services/api/routes/simulation.py` — Added `GET /simulation/map` endpoint
+
+### Next steps
+- Build React frontend with Canvas map rendering
+- Docker Compose orchestration
