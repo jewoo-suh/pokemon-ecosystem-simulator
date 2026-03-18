@@ -480,6 +480,166 @@ Built a Perlin noise map generator that creates natural-looking terrain and deri
 - `services/simulation/engine.py` — Load adjacency, spatial migration
 - `services/api/routes/simulation.py` — Added `GET /simulation/map` endpoint
 
+---
+
+## 2026-03-18 — Phase 1: 3D Visualization & Engine Optimization
+
+### What happened
+- Built React Three Fiber 3D isometric world (Monument Valley style)
+- Terraced heightmap terrain with flat shading and pastel biome colors
+- Low-poly biome decorations: trees (forests), rocks (mountains), crystals (caves), buildings (urban)
+- Pokemon pixel art sprites from PokeAPI as billboard textures
+- Agent behavior system: wandering, flocking (boids), predator-prey chase/flee
+- Animated water, fog, warm directional lighting
+- Timeline bar with simulation playback and animation frames
+- Connected component biome splitting (9 types → 66 distinct regions)
+- Numpy-vectorized engine: 2600ms/tick → 162ms/tick (16x speedup)
+- Compact animation frame API (73MB → 2.8MB per 50 frames)
+
+### Key technical decisions
+- **Instanced rendering** for decorations and shadows (single draw call per type)
+- **Spatial hash grid** for O(n) neighbor lookups in flocking/chase behaviors
+- **Pre-computed local prey lists** per predator-biome pair (eliminated 31% wasted lookups)
+- **Biome splitting via flood-fill**: disconnected regions of same biome type become separate DB entries with own carrying capacity, preventing cross-map predation
+- **Elevation data in map JSON**: quantized to uint8 (326KB total) for 3D terrain mesh
+
+### Files created
+- `frontend/src/components/IsometricScene.jsx` — R3F Canvas wrapper with camera, lighting, fog
+- `frontend/src/components/TerrainMesh.jsx` — Heightmap mesh with terraced elevation
+- `frontend/src/components/BiomeDecorations.jsx` — Procedural low-poly props
+- `frontend/src/components/PokemonSprites.jsx` — Billboard sprites with agent behaviors
+- `frontend/src/components/BiomeMap.jsx` — 2D canvas fallback view
+- `frontend/src/components/TimelineBar.jsx` — Playback controls with scrub bar
+- `frontend/src/components/Sidebar.jsx` — Species detail panel
+
+---
+
+## 2026-03-18 — Phase 2: Seasons, Random Events & Diversity Indices
+
+### What happened
+- Added 4-season cycle (spring/summer/autumn/winter, 25 ticks each)
+- Added random ecosystem events (drought, disease, fire, flood, bloom)
+- Added ecological diversity indices (Shannon, Simpson, evenness, food web connectance)
+- Ran 1000-tick (10-year) comparison: Phase 1 vs Phase 2
+
+### Season mechanics
+Each season modifies 7 simulation parameters:
+- **Spring**: food_regen 1.5x, reproduction 1.5x, mortality 0.7x (breeding season)
+- **Summer**: stable peak, food_regen 1.2x, low migration (settled)
+- **Autumn**: food_regen 0.7x, migration 1.8x, predation 1.2x (preparing for winter)
+- **Winter**: food_regen 0.3x, mortality 1.6x, reproduction 0.15x (harsh survival)
+
+### Random events
+~5% chance per tick, season-weighted:
+- **Drought**: kills 30-50% producers in a biome, drops everyone's food
+- **Disease**: kills 20-40% of the most populous species in a biome
+- **Fire**: kills 15-30% of all species (producers hit harder)
+- **Flood**: kills 10-20% of non-water species, water types benefit
+- **Bloom**: boosts producers 30-60% in a biome
+
+### Diversity indices
+- **Shannon H'**: species diversity based on proportional abundance
+- **Simpson 1-D**: probability two random individuals are different species
+- **Evenness**: how equitably population is distributed (H/ln(S))
+- **Food web connectance**: proportion of possible predator-prey links that are active
+
+### 1000-tick comparison results
+
+| Metric | Phase 1 (no seasons) | Phase 2 (seasons) |
+|--------|---------------------|-------------------|
+| Final Population | 195,150 | 182,601 |
+| Species Alive | 956 (93.3%) | 954 (93.1%) |
+| Shannon H' | 6.012 | **6.022** |
+| Simpson 1-D | 0.9960 | **0.9964** |
+| Evenness | 0.876 | **0.878** |
+| Connectance | 0.0205 | 0.0200 |
+| Stability (CV%) | 0.30% | 3.28% (seasonal) |
+| Trend T800-1000 | +0.16% | +0.38% |
+
+**Key findings:**
+1. Both simulations stabilize by year 5-6 (~194k and ~190k respectively)
+2. Phase 2 has higher biodiversity despite lower population — seasons prevent dominance
+3. Producers healthier in Phase 2 (10.5% vs 9.0%) — spring blooms sustain food chain
+4. Phase 2's 3.28% CV is seasonal heartbeat, not instability
+5. 40 random events over 1000 ticks caused zero additional extinctions — ecosystem is resilient
+6. **Verdict: Phase 2 is the better simulation** — more realistic, higher diversity, richer data
+
+### Seasonal population patterns (Phase 2, years 6-10)
+| Season | Avg Pop | Min | Max | Range |
+|--------|---------|-----|-----|-------|
+| Spring | 193,439 | 179,716 | 198,002 | 9.5% |
+| Summer | 195,354 | 193,160 | 197,573 | 2.3% |
+| Autumn | 194,053 | 192,964 | 196,163 | 1.6% |
+| Winter | 182,020 | 173,338 | 194,389 | 11.6% |
+
+### Files created/modified
+- `services/simulation/engine.py` — Added `get_season()`, `_roll_random_event()`, `_apply_random_event()`, `compute_diversity_indices()`, season modifiers in all 7 phases
+- `services/api/routes/stats.py` — Added `GET /stats/diversity` endpoint
+- `services/api/routes/simulation.py` — Season info in animation frames
+- `frontend/src/components/TimelineBar.jsx` — Season badge and year counter
+- `db/` — Added drought/disease/fire/flood/bloom to event_type_enum
+
+---
+
+## 2026-03-18 — Phase 2: Hexagonal World & Visual Overhaul
+
+### What happened
+- Rebuilt terrain from smooth heightmap to floating hexagonal tiles
+- World clipped to hexagonal boundary shape (no more rectangular edges)
+- Added liquid glass material (meshPhysicalMaterial with clearcoat + glass overlay)
+- Brightened and saturated the pastel color palette
+- Fixed Pokemon sprite rendering (simplified from ref-based to state-based approach)
+- Git version control: Phase 1 tagged, Phase 2 on separate branch
+
+### Terrain overhaul
+- Each grid cell → hexagonal tile with flat top, thin side band, bottom face
+- Tiles float at terraced elevation levels (10 discrete steps)
+- Hex offset rows (every other row shifts half a hex) for natural tessellation
+- `isInsideHexWorld()` clips to hexagonal boundary using axial coordinate distance
+- Side faces slightly darker + blue-shifted for glass depth effect
+- Decorations and sprites filtered to only appear within hex boundary
+
+### Color palette (bright pastels)
+| Biome | Color |
+|-------|-------|
+| Sea | Bright sky blue (0.55, 0.78, 0.95) |
+| Waters-edge | Vivid mint (0.60, 0.90, 0.85) |
+| Forest | Bright green (0.50, 0.85, 0.50) |
+| Grassland | Vivid lime (0.82, 0.92, 0.50) |
+| Rough-terrain | Warm peach (0.88, 0.72, 0.55) |
+| Mountain | Light lilac (0.88, 0.82, 0.88) |
+| Cave | Rosy brown (0.70, 0.55, 0.50) |
+| Urban | Bright lavender (0.85, 0.75, 0.92) |
+| Rare | Bright gold (0.95, 0.88, 0.55) |
+
+### Material: liquid glass
+- `meshPhysicalMaterial` with `clearcoat: 0.8`, `roughness: 0.15`, `reflectivity: 0.5`
+- Second transparent overlay mesh (`opacity: 0.06`, `clearcoat: 1.0`) for glass sheen
+- Flat shading preserves geometric hex edges
+
+### Pokemon sprite fix
+- Original ref-based approach (`useRef` + `forwardRef` + `useFrame`) failed to trigger re-renders
+- Replaced with simplified state-based component using `useState` + direct `<sprite>` rendering
+- Sprites capped at 500 visible, retry logic for hex boundary placement
+
+### 1000-tick comparison results
+Full Phase 1 vs Phase 2 comparison over 10 simulated years confirmed:
+- Phase 2 has higher Shannon diversity (6.02 vs 6.01)
+- Phase 2 has better evenness (0.878 vs 0.876)
+- Both stabilize by year 5-6 (~194k and ~190k respectively)
+- Phase 2 seasonal oscillation: winter dips to ~182k, spring recovers to ~195k
+- 40 random events (fires, floods, droughts, disease, blooms) caused zero additional extinctions
+
+### Files created/modified
+- `frontend/src/components/TerrainMesh.jsx` — Hex tile terrain with liquid glass material
+- `frontend/src/components/PokemonSprites_debug.jsx` — Simplified working sprite renderer
+- `frontend/src/components/IsometricScene.jsx` — Updated camera, lighting, fog for hex world
+- `frontend/src/components/BiomeDecorations.jsx` — Hex world boundary filtering
+- `services/simulation/long_run.py` — Phase 1 vs Phase 2 comparison script
+
 ### Next steps
-- Build React frontend with Canvas map rendering
+- Population dashboard with live graphs overlaid on 3D world
+- Day/night cycle tied to seasons
+- Species-specific behaviors (Snorlax idle, birds fly higher)
+- Carrying capacity degradation
 - Docker Compose orchestration

@@ -1,7 +1,7 @@
 import { useMemo, useEffect, useState, useRef, useCallback, forwardRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getTerrainHeight, WATER_LEVEL, HEIGHT_SCALE } from './TerrainMesh';
+import { getTerrainHeight, WATER_LEVEL, HEIGHT_SCALE, gridToHexWorld, isGridInsideHexWorld } from './TerrainMesh';
 
 const API = 'http://localhost:8000';
 const MAX_DOTS = 8;
@@ -42,6 +42,7 @@ function createAgent(x, y, z, speciesId, biomeId, rng) {
   return {
     x, y, z,              // current world position
     homeX: x, homeZ: z,   // anchor point (stays near here)
+    baseY: y,             // terrain height at spawn (for Y updates)
     vx: (rng() - 0.5) * 0.3,
     vz: (rng() - 0.5) * 0.3,
     speciesId,
@@ -188,17 +189,19 @@ function updateAgents(agents, delta, elevation, width, foodChain) {
     a.x += a.vx;
     a.z += a.vz;
 
-    // --- Clamp to map ---
-    a.x = Math.max(0.5, Math.min(width - 1.5, a.x));
-    a.z = Math.max(0.5, Math.min(width - 1.5, a.z));
+    // --- Clamp: keep near home (hex world coords) ---
+    // Don't wander more than 15 units from home
+    const dHomeX = a.x - a.homeX;
+    const dHomeZ = a.z - a.homeZ;
+    const homeDist2 = Math.sqrt(dHomeX * dHomeX + dHomeZ * dHomeZ);
+    if (homeDist2 > 15) {
+      a.x = a.homeX + (dHomeX / homeDist2) * 15;
+      a.z = a.homeZ + (dHomeZ / homeDist2) * 15;
+    }
 
     // --- Update Y from terrain + bob ---
-    const ix = Math.floor(Math.max(0, Math.min(width - 1, a.x)));
-    const iz = Math.floor(Math.max(0, Math.min(width - 1, a.z)));
-    const rawElev = elevation[iz * width + ix] / 255;
-    const isWater = rawElev < WATER_LEVEL;
-
-    const terrainY = isWater ? WATER_Y : getTerrainHeight(elevation, width, a.x, a.z);
+    // Use stored grid coords for elevation lookup (hex world coords don't map 1:1 to grid)
+    const terrainY = a.baseY || WATER_Y;
     a.bobPhase += dt * 2.5;
     a.y = terrainY + SPRITE_SIZE * 0.5 + Math.sin(a.bobPhase) * 0.15;
   }
@@ -211,10 +214,11 @@ function updateAgents(agents, delta, elevation, width, foodChain) {
 export default function PokemonSprites({ mapData, biomeCells, animFrame }) {
   const [slots, setSlots] = useState(null);
   const [foodChain, setFoodChain] = useState(null);
+  const [agentVersion, setAgentVersion] = useState(0); // triggers re-render when agents change
   const agentsRef = useRef([]);
   const spritesRef = useRef([]);
 
-  const { width, elevation } = mapData;
+  const { width, height: mapHeight, elevation } = mapData;
 
   // Load food chain for predator-prey behaviors
   useEffect(() => {
@@ -257,20 +261,28 @@ export default function PokemonSprites({ mapData, biomeCells, animFrame }) {
 
             const positions = [];
             for (let i = 0; i < MAX_DOTS; i++) {
-              const cell = cells[Math.floor(rng() * cells.length)];
-              const gx = cell.x + rng() * 0.9 + 0.05;
-              const gz = cell.y + rng() * 0.9 + 0.05;
+              // Try up to 5 cells to find one inside the hex world
+              let placed = false;
+              for (let attempt = 0; attempt < 5; attempt++) {
+                const cell = cells[Math.floor(rng() * cells.length)];
+                const gx = cell.x + rng() * 0.9 + 0.05;
+                const gz = cell.y + rng() * 0.9 + 0.05;
+                const ix = Math.floor(gx);
+                const iz = Math.floor(gz);
 
-              const ix = Math.floor(gx);
-              const iz = Math.floor(gz);
-              const rawElev = elevation[iz * width + ix] / 255;
-              const isWater = rawElev < WATER_LEVEL;
+                if (!isGridInsideHexWorld(gx, gz, width, mapHeight)) continue;
 
-              const gy = isWater
-                ? WATER_Y + SPRITE_SIZE * 0.5
-                : getTerrainHeight(elevation, width, gx, gz) + SPRITE_SIZE * 0.5;
+                const [wx, wz] = gridToHexWorld(gx, gz, width);
+                const rawElev = elevation[iz * width + ix] / 255;
+                const isWater = rawElev < WATER_LEVEL;
+                const gy = isWater
+                  ? WATER_Y + SPRITE_SIZE * 0.5
+                  : getTerrainHeight(elevation, width, gx, gz) + SPRITE_SIZE * 0.5;
 
-              positions.push({ x: gx, y: gy, z: gz });
+                positions.push({ x: wx, y: gy, z: wz });
+                placed = true;
+                break;
+              }
             }
 
             slotMap[key] = {
@@ -300,6 +312,7 @@ export default function PokemonSprites({ mapData, biomeCells, animFrame }) {
 
         // Build initial agents
         rebuildAgents(slotMap, null, agentsRef, rng, width);
+        setAgentVersion(v => v + 1);
       });
   }, [biomeCells]);
 
@@ -308,6 +321,7 @@ export default function PokemonSprites({ mapData, biomeCells, animFrame }) {
     if (!animFrame || !slots) return;
     const rng = mulberry32(77);
     rebuildAgents(slots, animFrame, agentsRef, rng, width);
+    setAgentVersion(v => v + 1);
   }, [animFrame, slots]);
 
   // Per-frame agent update

@@ -2,9 +2,9 @@ import { useState, useEffect, Suspense, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrthographicCamera, MapControls } from '@react-three/drei';
 import * as THREE from 'three';
-import TerrainMesh, { WATER_LEVEL, HEIGHT_SCALE } from './TerrainMesh';
+import TerrainMesh, { WATER_LEVEL, HEIGHT_SCALE, getHexWorldSize } from './TerrainMesh';
 import BiomeDecorations from './BiomeDecorations';
-import PokemonSprites from './PokemonSprites';
+import PokemonSprites from './PokemonSprites_debug'; // simplified version that works
 
 const API = 'http://localhost:8000';
 
@@ -62,17 +62,18 @@ export default function IsometricScene({ onSpeciesClick, onTickLoaded, animFrame
   if (!mapData || !mapData.elevation) {
     return (
       <div style={{
-        color: '#8a7a6a', padding: 40, flex: 1,
+        color: '#8a7a8a', padding: 40, flex: 1,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: '#f0e6d8', fontSize: 16, fontFamily: 'Georgia, serif',
+        background: '#eee8f0', fontSize: 16, fontFamily: 'Georgia, serif',
       }}>
         Loading world...
       </div>
     );
   }
 
-  const cx = mapData.width / 2;
-  const cz = mapData.height / 2;
+  const [worldW, worldH] = getHexWorldSize(mapData.width, mapData.height);
+  const cx = worldW / 2;
+  const cz = worldH / 2;
 
   return (
     <div style={{ flex: 1, position: 'relative' }}>
@@ -84,27 +85,27 @@ export default function IsometricScene({ onSpeciesClick, onTickLoaded, animFrame
         }}
         style={{ width: '100%', height: '100%' }}
       >
-        {/* Warm pastel sky */}
-        <color attach="background" args={['#e8ddd0']} />
-        <fog attach="fog" args={['#e8ddd0', 120, 320]} />
+        {/* Bright pastel sky */}
+        <color attach="background" args={['#f2eef8']} />
+        <fog attach="fog" args={['#f2eef8', 120, 380]} />
 
         <OrthographicCamera
           makeDefault
-          zoom={4.5}
-          position={[cx + 70, 70, cz + 70]}
+          zoom={3}
+          position={[cx + 80, 80, cz + 80]}
           near={0.1}
-          far={500}
+          far={600}
         />
         <MapControls
           enableRotate={false}
           target={[cx, 4, cz]}
-          minZoom={2}
-          maxZoom={30}
+          minZoom={1}
+          maxZoom={25}
           panSpeed={1.5}
         />
 
-        {/* Monument Valley-style warm directional lighting */}
-        <ambientLight intensity={0.55} color="#fff0e0" />
+        {/* Bright warm lighting */}
+        <ambientLight intensity={0.7} color="#fff5ee" />
         <directionalLight
           position={[cx + 80, 100, cz - 50]}
           intensity={0.75}
@@ -120,7 +121,7 @@ export default function IsometricScene({ onSpeciesClick, onTickLoaded, animFrame
 
         <Suspense fallback={null}>
           <TerrainMesh mapData={mapData} />
-          <WaterPlane width={mapData.width} height={mapData.height} />
+          <WaterPlane width={worldW + 10} height={worldH + 10} />
           <BiomeDecorations mapData={mapData} />
           {biomeCells && (
             <PokemonSprites

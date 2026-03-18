@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import * as THREE from 'three';
-import { getTerrainHeight, getBiomeBaseId, WATER_LEVEL } from './TerrainMesh';
+import { getTerrainHeight, getBiomeBaseId, WATER_LEVEL, gridToHexWorld, isGridInsideHexWorld } from './TerrainMesh';
 
 // Deterministic PRNG
 function mulberry32(seed) {
@@ -44,7 +44,8 @@ export default function BiomeDecorations({ mapData }) {
     for (let iz = 0; iz < height; iz += 2) {
       for (let ix = 0; ix < width; ix += 2) {
         const rawElev = elevation[iz * width + ix] / 255;
-        if (rawElev < WATER_LEVEL) continue; // skip water
+        if (rawElev < WATER_LEVEL) continue;
+        if (!isGridInsideHexWorld(ix, iz, width, height)) continue;
 
         const baseId = getBiomeBaseId(grid, biome_colors, ix, iz, width);
         const config = DECORATION_CONFIG[baseId];
@@ -54,6 +55,7 @@ export default function BiomeDecorations({ mapData }) {
 
         const gx = ix + rng() * 1.5;
         const gz = iz + rng() * 1.5;
+        const [wx, wz] = gridToHexWorld(gx, gz, width);
         const gy = getTerrainHeight(elevation, width, gx, gz);
 
         // Random scale variation
@@ -62,7 +64,7 @@ export default function BiomeDecorations({ mapData }) {
 
         items.push({
           type: config.type,
-          position: [gx, gy, gz],
+          position: [wx, gy, wz],
           scale,
           rotation,
           color: config.color,

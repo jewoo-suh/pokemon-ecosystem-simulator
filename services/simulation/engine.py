@@ -464,7 +464,8 @@ class SimulationEngine:
                 total_pop = int(np.sum(self.pop))
                 alive = int(np.sum(self.pop > 0))
                 elapsed = time.time() - start_time
-                print(f"  Tick {current_tick}: {total_pop} total pop, "
+                s_name, _ = self.get_season(current_tick)
+                print(f"  Tick {current_tick} [{s_name:6s}]: {total_pop} total pop, "
                       f"{alive} active species-biomes, "
                       f"{len(events)} events, "
                       f"{elapsed:.1f}s elapsed")
@@ -474,11 +475,226 @@ class SimulationEngine:
         print(f"\nSimulation complete: {num_ticks} ticks in {elapsed:.1f}s")
         print(f"  Final population: {total_pop}")
 
+    @staticmethod
+    def get_season(tick):
+        """Determine current season from tick number.
+        100 ticks = 1 year. Each season lasts 25 ticks.
+        Returns (season_name, season_modifiers).
+        """
+        ticks_per_year = 100
+        season_tick = tick % ticks_per_year
+
+        if season_tick < 25:
+            # Spring: food blooms, reproduction surge, low mortality
+            return "spring", {
+                "food_regen": 1.5,      # producers regenerate faster
+                "metabolism": 0.85,      # less hunger (mild weather)
+                "grazing": 1.3,         # abundant vegetation
+                "mortality": 0.7,       # gentle conditions
+                "reproduction": 1.5,    # breeding season
+                "migration": 1.0,
+                "predation": 0.9,       # prey abundant, less desperate hunting
+            }
+        elif season_tick < 50:
+            # Summer: peak food, stable
+            return "summer", {
+                "food_regen": 1.2,
+                "metabolism": 1.0,
+                "grazing": 1.2,
+                "mortality": 0.85,
+                "reproduction": 1.1,
+                "migration": 0.8,       # settled, less movement
+                "predation": 1.0,
+            }
+        elif season_tick < 75:
+            # Autumn: food declining, migration increases, preparing for winter
+            return "autumn", {
+                "food_regen": 0.7,      # growth slowing
+                "metabolism": 1.1,      # building reserves
+                "grazing": 0.8,         # less vegetation
+                "mortality": 1.0,
+                "reproduction": 0.5,    # breeding season over
+                "migration": 1.8,       # seasonal migration
+                "predation": 1.2,       # hunting before winter
+            }
+        else:
+            # Winter: harsh conditions, high mortality, minimal reproduction
+            return "winter", {
+                "food_regen": 0.3,      # minimal growth
+                "metabolism": 1.3,      # need more energy to stay warm
+                "grazing": 0.4,         # scarce vegetation
+                "mortality": 1.6,       # harsh conditions
+                "reproduction": 0.15,   # almost no breeding
+                "migration": 0.5,       # hunkered down
+                "predation": 1.4,       # desperate hunting
+            }
+
+    def _roll_random_event(self, tick, season_name):
+        """Roll for a random ecosystem event. Returns event dict or None.
+
+        Events:
+          - drought:   kills producers, reduces food (more likely in summer/autumn)
+          - disease:   kills a % of a dense species in a biome
+          - fire:      devastates a forest/grassland biome
+          - flood:     hits waters-edge and low-elevation biomes
+          - bloom:     algal/plant bloom, massive producer boost in one biome
+
+        ~5% chance per tick of any event occurring.
+        """
+        if random.random() > 0.05:
+            return None
+
+        # Pick event type (weighted by season)
+        weights = {
+            "drought":  {"spring": 0.05, "summer": 0.35, "autumn": 0.30, "winter": 0.05},
+            "disease":  {"spring": 0.15, "summer": 0.25, "autumn": 0.20, "winter": 0.30},
+            "fire":     {"spring": 0.10, "summer": 0.40, "autumn": 0.25, "winter": 0.02},
+            "flood":    {"spring": 0.40, "summer": 0.10, "autumn": 0.15, "winter": 0.20},
+            "bloom":    {"spring": 0.50, "summer": 0.20, "autumn": 0.05, "winter": 0.02},
+        }
+
+        event_types = list(weights.keys())
+        probs = [weights[e][season_name] for e in event_types]
+        total = sum(probs)
+        probs = [p / total for p in probs]
+
+        event_type = random.choices(event_types, weights=probs, k=1)[0]
+
+        # Pick a random biome (weighted by population)
+        biome_pops = {}
+        for i in range(len(self.keys)):
+            if self.pop[i] > 0:
+                bid = self.keys[i][1]
+                biome_pops[bid] = biome_pops.get(bid, 0) + int(self.pop[i])
+
+        if not biome_pops:
+            return None
+
+        biome_ids = list(biome_pops.keys())
+        biome_weights = [biome_pops[b] for b in biome_ids]
+        target_biome = random.choices(biome_ids, weights=biome_weights, k=1)[0]
+
+        return {"type": event_type, "biome_id": target_biome, "tick": tick}
+
+    def _apply_random_event(self, event, events_list):
+        """Apply a random event's effects to the simulation state."""
+        etype = event["type"]
+        bid = event["biome_id"]
+
+        # Get all indices in this biome
+        biome_indices = self.biome_indices.get(bid, [])
+        alive_in_biome = [i for i in biome_indices if self.pop[i] > 0]
+        if not alive_in_biome:
+            return
+
+        biome_name = f"biome_{bid}"
+        # Try to get a readable name from DB-loaded data
+        for bname, bids in []:  # we don't have reverse lookup, use ID
+            pass
+
+        if etype == "drought":
+            # Producers lose 30-50% population, everyone's food drops
+            kill_rate = 0.3 + random.random() * 0.2
+            affected = 0
+            for i in alive_in_biome:
+                if self.is_producer[i]:
+                    deaths = int(self.pop[i] * kill_rate)
+                    self.pop[i] = max(1, self.pop[i] - deaths)
+                    affected += deaths
+                # Everyone in the biome gets hungrier
+                self.food[i] = max(0.0, self.food[i] - 0.2)
+            if affected > 0:
+                events_list.append(("drought", alive_in_biome[0] // 1 and self.keys[alive_in_biome[0]][0],
+                                    bid, f"Drought killed {affected} producers"))
+                print(f"    !!! DROUGHT in biome {bid}: {affected} producers lost")
+
+        elif etype == "disease":
+            # Find the most populous species in this biome and kill 20-40%
+            best_i, best_pop = None, 0
+            for i in alive_in_biome:
+                if self.pop[i] > best_pop and not self.is_legendary_arr[i]:
+                    best_pop = int(self.pop[i])
+                    best_i = i
+            if best_i is not None and best_pop > 20:
+                kill_rate = 0.2 + random.random() * 0.2
+                deaths = int(best_pop * kill_rate)
+                self.pop[best_i] -= deaths
+                pid = self.keys[best_i][0]
+                events_list.append(("disease", pid, bid,
+                                    f"Disease killed {deaths} (was {best_pop})"))
+                print(f"    !!! DISEASE in biome {bid}: {deaths} of species {pid} killed")
+
+        elif etype == "fire":
+            # Kill 15-30% of ALL species in the biome, producers hit harder
+            affected = 0
+            for i in alive_in_biome:
+                if self.is_legendary_arr[i]:
+                    continue
+                rate = 0.25 + random.random() * 0.15 if self.is_producer[i] else 0.10 + random.random() * 0.1
+                deaths = int(self.pop[i] * rate)
+                if deaths > 0:
+                    self.pop[i] = max(0, self.pop[i] - deaths)
+                    affected += deaths
+            if affected > 0:
+                events_list.append(("fire", self.keys[alive_in_biome[0]][0], bid,
+                                    f"Fire killed {affected} across all species"))
+                print(f"    !!! FIRE in biome {bid}: {affected} killed across species")
+
+        elif etype == "flood":
+            # Kill 10-20% of non-water species, water species get a small boost
+            affected = 0
+            for i in alive_in_biome:
+                if self.is_legendary_arr[i]:
+                    continue
+                pid = self.keys[i][0]
+                primary_type = self.pokemon_primary_type.get(pid)
+                # Water types (type_id=11 typically) benefit
+                if primary_type == 11:
+                    self.food[i] = min(1.0, self.food[i] + 0.15)
+                else:
+                    rate = 0.1 + random.random() * 0.1
+                    deaths = int(self.pop[i] * rate)
+                    if deaths > 0:
+                        self.pop[i] = max(0, self.pop[i] - deaths)
+                        affected += deaths
+            if affected > 0:
+                events_list.append(("flood", self.keys[alive_in_biome[0]][0], bid,
+                                    f"Flood killed {affected}, water types thrived"))
+                print(f"    !!! FLOOD in biome {bid}: {affected} killed, water types thrived")
+
+        elif etype == "bloom":
+            # Massive producer boost: +30-60% population for all producers
+            boosted = 0
+            for i in alive_in_biome:
+                if self.is_producer[i]:
+                    boost = int(self.pop[i] * (0.3 + random.random() * 0.3))
+                    self.pop[i] += boost
+                    self.food[i] = min(1.0, self.food[i] + 0.3)
+                    boosted += boost
+            if boosted > 0:
+                events_list.append(("bloom", self.keys[alive_in_biome[0]][0], bid,
+                                    f"Bloom added {boosted} producers"))
+                print(f"    !!! BLOOM in biome {bid}: {boosted} new producers")
+
     def _run_tick(self, tick):
         """Execute one simulation tick. Returns list of events."""
         events = []
         time_scale = self.config.get("time_scale", 1.0)
         N = len(self.keys)
+
+        # --- Season system ---
+        season_name, season = self.get_season(tick)
+
+        # Log season change (not saved to DB events — just console)
+        if tick % 25 == 1:
+            total_pop = int(np.sum(self.pop))
+            alive_count = int(np.sum(self.pop > 0))
+            print(f"  >>> Season: {season_name} (tick {tick}, pop: {total_pop}, alive: {alive_count})")
+
+        # --- Random events ---
+        random_event = self._roll_random_event(tick, season_name)
+        if random_event:
+            self._apply_random_event(random_event, events)
 
         # Track populations before this tick for stability check
         prev_pop = self.pop.copy()
@@ -508,15 +724,17 @@ class SimulationEngine:
         species_count_per_entry = biome_species_counts_arr[self.bid_int_arr]
 
         # --- Phase 1: Food regeneration & regrowth (producers) ---
+        food_regen_rate = 0.15 * season["food_regen"]
         producer_alive = alive & self.is_producer
-        # Producers photosynthesize
-        self.food[producer_alive] = np.minimum(1.0, self.food[producer_alive] + 0.15)
+        # Producers photosynthesize (seasonal)
+        self.food[producer_alive] = np.minimum(1.0, self.food[producer_alive] + food_regen_rate)
 
-        # Regrowth: plants regenerate population if below biome capacity and fed
+        # Regrowth: plants regenerate population (seasonal)
+        regrow_mult = season["food_regen"]
         regrow_mask = producer_alive & (self.food > 0.5) & (bt_per_entry < biome_cap_per_entry)
         regrow_indices = np.where(regrow_mask)[0]
         for i in regrow_indices:
-            regrowth = max(1, min(5, int(self.pop[i] * 0.03)))
+            regrowth = max(1, min(5, int(self.pop[i] * 0.03 * regrow_mult)))
             self.pop[i] += regrowth
 
         # --- Phase 2: Metabolism (everyone gets hungrier, except legendaries) ---
@@ -528,33 +746,33 @@ class SimulationEngine:
         active = alive & ~self.is_legendary_arr
         active_indices = np.where(active)[0]
 
-        # Vectorized metabolism
-        met = self.metabolism_arr * time_scale
+        # Vectorized metabolism (seasonal)
+        met = self.metabolism_arr * time_scale * season["metabolism"]
         # Small pop scavenging
         small_pop_mask = self.pop < 20
         scale = np.where(small_pop_mask, 0.5 + 0.5 * self.pop / 20.0, 1.0).astype(np.float32)
         met_scaled = met * scale
         self.food[active] = np.maximum(0.0, self.food[active] - met_scaled[active])
 
-        # --- Phase 2b: Grazing ---
-        # Primary consumers graze on biome vegetation
+        # --- Phase 2b: Grazing (seasonal) ---
+        graze_season = season["grazing"]
         primary_alive = active & self.is_primary
         if np.any(primary_alive):
             bt_safe = np.maximum(1, bt_per_entry).astype(np.float32)
             vegetation_ratio = producer_pop_per_entry.astype(np.float32) / bt_safe
-            graze_gain = np.minimum(0.15, vegetation_ratio * 0.5) * self.effective_biomass_arr
+            graze_gain = np.minimum(0.15, vegetation_ratio * 0.5) * self.effective_biomass_arr * graze_season
             self.food[primary_alive] = np.minimum(1.0, self.food[primary_alive] + graze_gain[primary_alive])
 
-        # Prey-less carnivores forage opportunistically at 30% rate
+        # Prey-less carnivores forage opportunistically at 30% rate (seasonal)
         carnivore_no_prey = active & (self.is_secondary | self.is_apex) & ~self.has_prey_arr
         if np.any(carnivore_no_prey):
             bt_safe = np.maximum(1, bt_per_entry).astype(np.float32)
             vegetation_ratio = producer_pop_per_entry.astype(np.float32) / bt_safe
-            forage_gain = np.minimum(0.15, vegetation_ratio * 0.5) * self.effective_biomass_arr * 0.3
+            forage_gain = np.minimum(0.15, vegetation_ratio * 0.5) * self.effective_biomass_arr * 0.3 * graze_season
             self.food[carnivore_no_prey] = np.minimum(1.0, self.food[carnivore_no_prey] + forage_gain[carnivore_no_prey])
 
-        # --- Phase 3: Predation (with prey-switching & saturation) ---
-        encounter_chance = self.config["predation_encounter_chance"] * time_scale
+        # --- Phase 3: Predation (with prey-switching & saturation, seasonal) ---
+        encounter_chance = self.config["predation_encounter_chance"] * time_scale * season["predation"]
 
         # Snapshot start populations for saturation caps (use numpy for speed)
         start_pops = self.pop.copy()
@@ -652,8 +870,8 @@ class SimulationEngine:
         active2 = alive2 & ~self.is_legendary_arr
         active2_indices = np.where(active2)[0]
 
-        # Vectorized mortality computation
-        mort = self.mortality_arr * time_scale
+        # Vectorized mortality computation (seasonal)
+        mort = self.mortality_arr * time_scale * season["mortality"]
 
         # Starvation multiplier
         starving = self.food < 0.3
@@ -772,7 +990,7 @@ class SimulationEngine:
                 prey_pressure_bonus = 1.0 + min(1.0, (num_predators - 10) / 20.0)
                 base_birth *= prey_pressure_bonus
 
-            birth_rate = min(0.7, base_birth) * growth_factor
+            birth_rate = min(0.7, base_birth) * growth_factor * season["reproduction"]
             if birth_rate <= 0.001:
                 continue
 
@@ -862,7 +1080,7 @@ class SimulationEngine:
             if not params:
                 continue
 
-            migration_rate = params["migration"]
+            migration_rate = params["migration"] * season["migration"]
             if random.random() > migration_rate:
                 continue
 
@@ -910,6 +1128,107 @@ class SimulationEngine:
         self.ticks_stable[:N_cur] = np.where(stable_mask, self.ticks_stable[:N_cur] + 1, 0)
 
         return events
+
+    def compute_diversity_indices(self):
+        """Compute ecological diversity indices from current state.
+
+        Returns dict with:
+          - global: Shannon, Simpson, richness, evenness, total_population
+          - per_biome: {biome_id: {shannon, simpson, richness, evenness, population}}
+          - per_trophic: {trophic: {species_count, population, proportion}}
+          - food_web: {connectance, links, species}
+        """
+        # --- Global indices ---
+        # Group populations by unique pokemon_id (across all biomes)
+        species_pops = defaultdict(int)
+        biome_species = defaultdict(lambda: defaultdict(int))  # biome_id -> {pokemon_id: pop}
+
+        for i in range(len(self.keys)):
+            if self.pop[i] <= 0:
+                continue
+            pid, bid = self.keys[i]
+            pop = int(self.pop[i])
+            species_pops[pid] += pop
+            biome_species[bid][pid] += pop
+
+        def _shannon_simpson(pop_dict):
+            """Compute Shannon H', Simpson D, richness S, evenness E from a population dict."""
+            total = sum(pop_dict.values())
+            if total == 0:
+                return {"shannon": 0, "simpson": 0, "richness": 0, "evenness": 0, "population": 0}
+
+            S = len(pop_dict)  # species richness
+            H = 0.0  # Shannon index
+            D = 0.0  # Simpson index (1 - D = diversity)
+
+            for pop in pop_dict.values():
+                if pop <= 0:
+                    continue
+                p = pop / total
+                H -= p * math.log(p)
+                D += p * p
+
+            # Evenness: H / ln(S)
+            E = H / math.log(S) if S > 1 else 1.0
+
+            return {
+                "shannon": round(H, 4),
+                "simpson": round(1 - D, 4),  # 1-D: higher = more diverse
+                "richness": S,
+                "evenness": round(E, 4),
+                "population": total,
+            }
+
+        global_indices = _shannon_simpson(species_pops)
+
+        # --- Per-biome indices ---
+        per_biome = {}
+        for bid, pops in biome_species.items():
+            per_biome[bid] = _shannon_simpson(pops)
+
+        # --- Per-trophic breakdown ---
+        trophic_data = defaultdict(lambda: {"species": set(), "population": 0})
+        for pid, pop in species_pops.items():
+            trophic = self.trophic_levels.get(pid, "unknown")
+            trophic_data[trophic]["species"].add(pid)
+            trophic_data[trophic]["population"] += pop
+
+        total_pop = sum(species_pops.values())
+        per_trophic = {}
+        for trophic, data in trophic_data.items():
+            per_trophic[trophic] = {
+                "species_count": len(data["species"]),
+                "population": data["population"],
+                "proportion": round(data["population"] / max(1, total_pop), 4),
+            }
+
+        # --- Food web metrics ---
+        active_species = set(species_pops.keys())
+        active_links = 0
+        for pred_id, prey_list in self.food_chain.items():
+            if pred_id not in active_species:
+                continue
+            for prey_id, _ in prey_list:
+                if prey_id in active_species:
+                    active_links += 1
+
+        S = len(active_species)
+        max_links = S * (S - 1) if S > 1 else 1
+        connectance = active_links / max_links if max_links > 0 else 0
+
+        food_web = {
+            "species": S,
+            "links": active_links,
+            "connectance": round(connectance, 6),
+            "links_per_species": round(active_links / max(1, S), 2),
+        }
+
+        return {
+            "global": global_indices,
+            "per_biome": per_biome,
+            "per_trophic": per_trophic,
+            "food_web": food_web,
+        }
 
     def _save_snapshot(self, tick):
         """Save current state to population_snapshots."""

@@ -1,5 +1,9 @@
+import sys
+import os
 from fastapi import APIRouter
 from db import get_cursor
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "simulation"))
 
 router = APIRouter()
 
@@ -77,3 +81,31 @@ def get_trophic_breakdown():
             ORDER BY total_population DESC
         """)
         return [dict(r) for r in cur.fetchall()]
+
+
+@router.get("/diversity")
+def get_diversity_indices():
+    """Compute ecological diversity indices (Shannon, Simpson, connectance, etc.)."""
+    from engine import SimulationEngine
+
+    engine = SimulationEngine()
+    engine.load_data()
+    engine._load_state()
+    engine._build_arrays()
+
+    indices = engine.compute_diversity_indices()
+
+    # Get current tick and season
+    cur = engine.conn.cursor()
+    cur.execute("SELECT value FROM simulation_metadata WHERE key = 'current_tick'")
+    current_tick = int(cur.fetchone()[0])
+    cur.close()
+
+    season_name, _ = engine.get_season(current_tick)
+    engine.conn.close()
+
+    return {
+        "tick": current_tick,
+        "season": season_name,
+        **indices,
+    }

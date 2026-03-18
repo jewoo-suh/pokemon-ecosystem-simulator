@@ -129,8 +129,10 @@ def run_simulation_frames(ticks: int = Query(50, ge=1, le=500)):
         # Snapshot: just population array (lightweight)
         alive_mask = engine.pop > 0
         alive_idx = np.where(alive_mask)[0]
+        season_name, _ = engine.get_season(current_tick)
         tick_pops.append({
             "tick": current_tick,
+            "season": season_name,
             "pops": {int(j): int(engine.pop[j]) for j in alive_idx},
             "total_population": int(engine.pop[alive_mask].sum()),
             "living_species": int(alive_mask.sum()),
@@ -168,6 +170,7 @@ def run_simulation_frames(ticks: int = Query(50, ge=1, le=500)):
 
         frames.append({
             "tick": tp["tick"],
+            "season": tp["season"],
             "populations": pop_arr,
             "total_population": tp["total_population"],
             "living_species": tp["living_species"],

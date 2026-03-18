@@ -86,6 +86,17 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame }) {
   const displayTick = frames && frames[frameIdx] ? frames[frameIdx].tick : currentTick;
   const totalPop = frames && frames[frameIdx] ? frames[frameIdx].total_population : null;
   const livingSpecies = frames && frames[frameIdx] ? frames[frameIdx].living_species : null;
+  const currentSeason = frames && frames[frameIdx]?.season
+    ? frames[frameIdx].season
+    : getSeason(displayTick);
+
+  const SEASON_STYLE = {
+    spring: { label: 'Spring', color: '#86efac' },
+    summer: { label: 'Summer', color: '#fbbf24' },
+    autumn: { label: 'Autumn', color: '#f97316' },
+    winter: { label: 'Winter', color: '#93c5fd' },
+  };
+  const seasonInfo = SEASON_STYLE[currentSeason] || SEASON_STYLE.spring;
 
   return (
     <div style={{
@@ -102,6 +113,19 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: frames ? 6 : 0 }}>
         <span style={{ fontSize: 13, color: '#9ca3af', whiteSpace: 'nowrap' }}>
           Tick: <strong style={{ color: '#c084fc' }}>{displayTick}</strong>
+        </span>
+
+        <span style={{
+          fontSize: 11, color: seasonInfo.color, fontWeight: 600,
+          padding: '2px 8px', borderRadius: 4,
+          background: `${seasonInfo.color}18`,
+          border: `1px solid ${seasonInfo.color}40`,
+        }}>
+          {seasonInfo.label}
+        </span>
+
+        <span style={{ fontSize: 11, color: '#666' }}>
+          Y{Math.floor(displayTick / 100) + 1}
         </span>
 
         <div style={{ width: 1, height: 20, background: '#2e303a' }} />
@@ -176,6 +200,14 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame }) {
       )}
     </div>
   );
+}
+
+function getSeason(tick) {
+  const t = tick % 100;
+  if (t < 25) return 'spring';
+  if (t < 50) return 'summer';
+  if (t < 75) return 'autumn';
+  return 'winter';
 }
 
 function btnStyle(disabled) {
