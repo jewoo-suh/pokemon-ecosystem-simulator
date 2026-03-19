@@ -112,6 +112,7 @@ export default function PopulationChart({ popHistory, currentTick }) {
               axisLine={false}
               tickLine={false}
               width={40}
+              domain={[0, 'auto']}
             />
             <Tooltip
               contentStyle={{
