@@ -399,12 +399,27 @@ def export_animation_frames():
     ts_spp = [[] for _ in biome_id_list]
     ts_ticks = []
     ts_events = []
+    all_engine_events = []  # disaster/disease/fire/flood/bloom from engine
     prev_season = None
 
     print(f"  Running {ticks} ticks (sampling anim every {ANIM_SAMPLE}, timeseries every {TS_SAMPLE})...")
     for i in range(ticks):
         current_tick += 1
-        engine._run_tick(current_tick)
+        tick_events = engine._run_tick(current_tick)
+
+        # Capture engine events (only disasters worth showing)
+        INTERESTING_EVENTS = {"drought", "disease", "fire", "flood", "bloom"}
+        if tick_events:
+            for ev in tick_events:
+                # ev is a tuple: (type, species_id, biome_id, detail)
+                if len(ev) >= 4 and ev[0] in INTERESTING_EVENTS:
+                    all_engine_events.append({
+                        "tick": current_tick,
+                        "type": ev[0],
+                        "biome_id": ev[2],
+                        "biome_name": biome_names.get(ev[2], "?"),
+                        "detail": ev[3],
+                    })
 
         season_name, _ = engine.get_season(current_tick)
         alive_mask = engine.pop > 0
@@ -488,6 +503,10 @@ def export_animation_frames():
     }
     write_json("animation_frames.json", data)
     print(f"  animation: {len(frames)} frames, {len(catalog)} species in catalog")
+
+    # Save engine events (disasters, etc.) for export_events() to merge
+    write_json("engine_events.json", all_engine_events)
+    print(f"  engine events: {len(all_engine_events)} (disasters/diseases/fires/floods/blooms)")
 
     # --- Generate biome_timeseries.json ---
     biome_ts = {
@@ -573,8 +592,17 @@ def export_events():
                     "detail": f"Population crash: {prev_total:,} \u2192 {curr_total:,}",
                 })
 
+    # Merge in engine events (disasters, diseases, fires, floods, blooms)
+    engine_events_path = os.path.join(OUTPUT_DIR, "engine_events.json")
+    if os.path.exists(engine_events_path):
+        with open(engine_events_path) as f:
+            engine_events = json.load(f)
+        events.extend(engine_events)
+        events.sort(key=lambda e: e["tick"])
+        print(f"  merged {len(engine_events)} engine events (disasters/fires/etc.)")
+
     write_json("animation_events.json", events)
-    print(f"  events: {len(events)} events generated")
+    print(f"  events: {len(events)} total events generated")
 
 
 def write_json(filename, data):
