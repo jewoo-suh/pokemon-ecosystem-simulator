@@ -6,13 +6,29 @@ function generateEventsFromFrames(frames, catalog) {
   const events = [];
   let prevSeason = null;
 
-  // Pre-build index: species_id -> catalog indices (for full-extinction check)
+  // Pre-build index: species_id -> catalog indices
   const speciesIndices = new Map();
   for (let j = 0; j < catalog.length; j++) {
     const id = catalog[j].id;
     if (!speciesIndices.has(id)) speciesIndices.set(id, []);
     speciesIndices.get(id).push(j);
   }
+
+  // Track population milestones (fire once per threshold)
+  const startPop = frames[0]?.total_population || 0;
+  const milestoneStep = Math.pow(10, Math.floor(Math.log10(startPop)) - 1) * 5; // e.g. 50,000 for ~474K
+  let nextMilestoneDown = Math.floor(startPop / milestoneStep) * milestoneStep - milestoneStep;
+
+  // Track unique species count milestones
+  const startSpeciesSet = new Set();
+  for (let j = 0; j < catalog.length; j++) {
+    if (frames[0]?.populations[j] > 0) startSpeciesSet.add(catalog[j].id);
+  }
+  const startSpeciesCount = startSpeciesSet.size;
+  let nextSpeciesMilestone = startSpeciesCount - 10; // every 10 species lost
+
+  // Track already-extinct species (don't re-report)
+  const extinctSpecies = new Set();
 
   for (let i = 0; i < frames.length; i++) {
     const frame = frames[i];
@@ -25,70 +41,54 @@ function generateEventsFromFrames(frames, catalog) {
     }
 
     if (i > 0) {
-      const prevPops = frames[i - 1].populations;
       const currPops = frame.populations;
 
-      // Biome-level extinctions (species went to 0 in a biome)
-      const reportedSpecies = new Set();
-      for (let j = 0; j < catalog.length; j++) {
-        if (prevPops[j] > 0 && currPops[j] === 0) {
-          const sp = catalog[j];
-
-          // Check if fully extinct (all biomes)
-          const indices = speciesIndices.get(sp.id);
-          const fullyExtinct = indices.every(k => currPops[k] === 0);
-
-          if (fullyExtinct && !reportedSpecies.has(sp.id)) {
-            reportedSpecies.add(sp.id);
-            events.push({
-              tick: frame.tick,
-              type: 'extinction',
-              species_id: sp.id,
-              species_name: sp.name,
-              biome_id: sp.biome_id,
-              biome_name: sp.biome,
-              detail: `${sp.name} is now globally extinct`,
-            });
-          } else if (!fullyExtinct) {
-            events.push({
-              tick: frame.tick,
-              type: 'extinction',
-              species_id: sp.id,
-              species_name: sp.name,
-              biome_id: sp.biome_id,
-              biome_name: sp.biome,
-              detail: `Lost ${prevPops[j]} in ${sp.biome}`,
-            });
-          }
+      // Full species extinction (gone from ALL biomes)
+      for (const [speciesId, indices] of speciesIndices) {
+        if (extinctSpecies.has(speciesId)) continue;
+        const fullyExtinct = indices.every(k => currPops[k] === 0);
+        if (fullyExtinct) {
+          extinctSpecies.add(speciesId);
+          const sp = catalog[indices[0]];
+          events.push({
+            tick: frame.tick,
+            type: 'extinction',
+            species_id: sp.id,
+            species_name: sp.name,
+            detail: `${sp.name} is now extinct`,
+          });
         }
       }
 
-      // Population crash: total drops >1% in one tick
-      const prevTotal = frames[i - 1].total_population;
-      const currTotal = frame.total_population;
-      if (prevTotal > 100) {
-        const dropPct = (prevTotal - currTotal) / prevTotal;
-        if (dropPct > 0.01) {
-          events.push({
-            tick: frame.tick,
-            type: 'disaster',
-            detail: `Pop ${Math.round(dropPct * 100)}% drop (${prevTotal.toLocaleString()} \u2192 ${currTotal.toLocaleString()})`,
-          });
-        }
+      // Population milestone (crossed a round number going down)
+      if (frame.total_population <= nextMilestoneDown && nextMilestoneDown > 0) {
+        events.push({
+          tick: frame.tick,
+          type: 'disaster',
+          detail: `Population below ${nextMilestoneDown.toLocaleString()}`,
+        });
+        nextMilestoneDown -= milestoneStep;
+      }
+
+      // Species count milestone
+      const currentUniqueSpecies = new Set();
+      for (let j = 0; j < catalog.length; j++) {
+        if (currPops[j] > 0) currentUniqueSpecies.add(catalog[j].id);
+      }
+      const uniqueCount = currentUniqueSpecies.size;
+      if (uniqueCount <= nextSpeciesMilestone && nextSpeciesMilestone > 0) {
+        const lost = startSpeciesCount - uniqueCount;
+        events.push({
+          tick: frame.tick,
+          type: 'disease',
+          detail: `${lost} species lost (${uniqueCount} remaining)`,
+        });
+        nextSpeciesMilestone -= 10;
       }
     }
   }
 
-  // Cap: if too many events, keep the most important ones
-  // (full extinctions > disasters > biome extinctions > season changes)
-  if (events.length > 2000) {
-    const priority = { extinction: 1, disaster: 2, season_change: 3 };
-    events.sort((a, b) => (priority[a.type] || 4) - (priority[b.type] || 4));
-    events.length = 2000;
-    events.sort((a, b) => a.tick - b.tick);
-  }
-
-  console.log(`[Events] Generated: ${events.length} total`);
+  console.log(`[Events] Generated: ${events.length} events`);
   return events;
 }
 
