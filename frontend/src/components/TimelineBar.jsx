@@ -28,10 +28,10 @@ function generateEventsFromFrames(frames, catalog) {
       const prevPops = frames[i - 1].populations;
       const currPops = frame.populations;
 
-      // Biome-level extinctions (species had meaningful pop then hit 0 in a biome)
+      // Biome-level extinctions (species went to 0 in a biome)
       const reportedSpecies = new Set();
       for (let j = 0; j < catalog.length; j++) {
-        if (prevPops[j] >= 10 && currPops[j] === 0) {
+        if (prevPops[j] > 0 && currPops[j] === 0) {
           const sp = catalog[j];
 
           // Check if fully extinct (all biomes)
@@ -63,12 +63,12 @@ function generateEventsFromFrames(frames, catalog) {
         }
       }
 
-      // Population crash: total drops >5% in one tick
+      // Population crash: total drops >1% in one tick
       const prevTotal = frames[i - 1].total_population;
       const currTotal = frame.total_population;
       if (prevTotal > 100) {
         const dropPct = (prevTotal - currTotal) / prevTotal;
-        if (dropPct > 0.05) {
+        if (dropPct > 0.01) {
           events.push({
             tick: frame.tick,
             type: 'disaster',
