@@ -66,15 +66,18 @@ export default function WorldView() {
     setPlaying(isPlaying);
   }, []);
 
-  // Compute live stats from animFrame
-  const liveOverview = animFrame ? {
-    total_population: animFrame.total_population,
-    living_species: animFrame.living_species,
-    total_species: overview?.total_species || animFrame.living_species,
-    survival_rate: overview?.total_species
-      ? Math.round(animFrame.living_species / overview.total_species * 1000) / 10
-      : 100,
-  } : overview;
+  // Compute live stats from animFrame (deduplicate species across biomes)
+  const liveOverview = animFrame && animFrame.species ? (() => {
+    const uniqueIds = new Set(animFrame.species.map(sp => sp.id));
+    const livingCount = uniqueIds.size;
+    const totalSpecies = overview?.total_species || livingCount;
+    return {
+      total_population: animFrame.total_population,
+      living_species: livingCount,
+      total_species: totalSpecies,
+      survival_rate: Math.round(livingCount / totalSpecies * 1000) / 10,
+    };
+  })() : overview;
 
   const liveTrophic = animFrame && animFrame.species ? (() => {
     const tMap = {};

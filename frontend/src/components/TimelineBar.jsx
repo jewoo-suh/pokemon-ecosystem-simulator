@@ -2,6 +2,53 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { runAnimationFrames, getEvents } from '../data';
 
+function generateEventsFromFrames(frames, catalog) {
+  const events = [];
+  let prevSeason = null;
+
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i];
+    const season = frame.season || getSeason(frame.tick);
+
+    if (season !== prevSeason) {
+      events.push({ tick: frame.tick, type: 'season_change', season });
+      prevSeason = season;
+    }
+
+    if (i > 0) {
+      const prevPops = frames[i - 1].populations;
+      const currPops = frame.populations;
+      // Track unique species extinctions per tick (not per biome)
+      const extinctThisTick = new Map();
+      for (let j = 0; j < catalog.length; j++) {
+        if (prevPops[j] > 0 && currPops[j] === 0) {
+          const sp = catalog[j];
+          const key = sp.id;
+          // Only report extinction if ALL biome populations for this species are 0
+          if (!extinctThisTick.has(key)) {
+            // Check if species still alive in any other biome
+            const stillAlive = catalog.some((c, k) =>
+              c.id === sp.id && k !== j && currPops[k] > 0
+            );
+            if (!stillAlive) {
+              extinctThisTick.set(key, {
+                tick: frame.tick,
+                type: 'extinction',
+                species_id: sp.id,
+                species_name: sp.name,
+                biome_id: sp.biome_id,
+                biome_name: sp.biome,
+              });
+            }
+          }
+        }
+      }
+      events.push(...extinctThisTick.values());
+    }
+  }
+  return events;
+}
+
 function getSeason(tick) {
   const t = tick % 100;
   if (t < 25) return 'spring';
@@ -70,18 +117,23 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
       setFrameIdx(0);
       if (onTicksRun) onTicksRun(data);
 
-      // Load events and index by tick
+      // Load events: try server/static first, fall back to client-side generation
+      let eventData = [];
       try {
-        const eventData = await getEvents();
-        const evMap = new Map();
-        for (const ev of eventData) {
-          if (!evMap.has(ev.tick)) evMap.set(ev.tick, []);
-          evMap.get(ev.tick).push(ev);
-        }
-        eventsMapRef.current = evMap;
+        eventData = await getEvents();
       } catch (e) {
-        console.warn('[Timeline] Events not available:', e);
+        // ignore
       }
+      if (!eventData || eventData.length === 0) {
+        eventData = generateEventsFromFrames(data.frames, data.species);
+        console.log(`[Timeline] Generated ${eventData.length} events from frame data`);
+      }
+      const evMap = new Map();
+      for (const ev of eventData) {
+        if (!evMap.has(ev.tick)) evMap.set(ev.tick, []);
+        evMap.get(ev.tick).push(ev);
+      }
+      eventsMapRef.current = evMap;
 
       setPlaying(true);
     } catch (err) {
@@ -133,7 +185,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
           <>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Simulate</span>
             <input
-              type="range" min={10} max={200} step={10} value={tickCount}
+              type="range" min={10} max={500} step={10} value={tickCount}
               onChange={e => setTickCount(Number(e.target.value))}
               style={{ width: 100, accentColor: 'var(--accent)' }}
               disabled={loading}
