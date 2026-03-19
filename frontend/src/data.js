@@ -150,6 +150,28 @@ export async function getEvents() {
   }
 }
 
+export async function getBiomeTimeseries() {
+  await detectMode();
+  if (useStatic) {
+    try {
+      const res = await fetch(`${STATIC}/biome_timeseries.json`);
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
+  } else {
+    // No API endpoint for this — always use static
+    try {
+      const res = await fetch(`${STATIC}/biome_timeseries.json`);
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
+  }
+}
+
 export function isStaticMode() {
   return useStatic === true;
 }

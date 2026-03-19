@@ -139,6 +139,13 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
       if (pops[i] > 0) species.push({ ...catalog[i], population: pops[i] });
     }
     const tickEvents = eventsMapRef.current?.get(frame.tick) || [];
+    // Collect all events up to current tick for the event log
+    const allEventsToTick = [];
+    if (eventsMapRef.current) {
+      for (const [tick, evts] of eventsMapRef.current) {
+        if (tick <= frame.tick) allEventsToTick.push(...evts);
+      }
+    }
     if (onFrame) onFrame({
       tick: frame.tick,
       season: frame.season || getSeason(frame.tick),
@@ -146,6 +153,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
       total_population: frame.total_population,
       living_species: frame.living_species,
       events: tickEvents,
+      allEvents: allEventsToTick,
     });
   }, [frameIdx, frames, catalog]);
 
@@ -309,13 +317,74 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
         )}
       </div>
 
-      {/* Scrub bar */}
+      {/* Scrub bar with season bands and event markers */}
       {frames && (
-        <input
-          type="range" min={0} max={frames.length - 1} value={frameIdx}
-          onChange={e => { setPlaying(false); setFrameIdx(Number(e.target.value)); }}
-          style={{ width: '100%', accentColor: 'var(--accent)', marginTop: 8, height: 4 }}
-        />
+        <div style={{ position: 'relative', marginTop: 8 }}>
+          {/* Season color bands */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: 4,
+            display: 'flex', borderRadius: 2, overflow: 'hidden',
+            pointerEvents: 'none',
+          }}>
+            {frames.map((f, i) => {
+              const s = f.season || getSeason(f.tick);
+              const colors = {
+                spring: 'var(--season-spring)',
+                summer: 'var(--season-summer)',
+                autumn: 'var(--season-autumn)',
+                winter: 'var(--season-winter)',
+              };
+              return (
+                <div
+                  key={i}
+                  style={{
+                    flex: 1,
+                    background: colors[s] || 'var(--bg-secondary)',
+                    opacity: 0.35,
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Event marker dots */}
+          {eventsMapRef.current && (
+            <div style={{
+              position: 'absolute', top: -4, left: 0, right: 0, height: 4,
+              pointerEvents: 'none',
+            }}>
+              {Array.from(eventsMapRef.current.entries()).map(([tick, evts]) => {
+                const nonSeason = evts.filter(e => e.type !== 'season_change');
+                if (nonSeason.length === 0) return null;
+                const startTick = frames[0]?.tick || 1;
+                const endTick = frames[frames.length - 1]?.tick || 200;
+                const pct = ((tick - startTick) / (endTick - startTick)) * 100;
+                const hasDisaster = nonSeason.some(e => e.type === 'disaster');
+                return (
+                  <div
+                    key={tick}
+                    style={{
+                      position: 'absolute',
+                      left: `${pct}%`,
+                      top: 0,
+                      width: 3,
+                      height: 3,
+                      borderRadius: '50%',
+                      background: hasDisaster ? '#e86b8a' : '#e8944a',
+                      transform: 'translateX(-1px)',
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <input
+            type="range" min={0} max={frames.length - 1} value={frameIdx}
+            onChange={e => { setPlaying(false); setFrameIdx(Number(e.target.value)); }}
+            style={{ width: '100%', accentColor: 'var(--accent)', height: 4, position: 'relative' }}
+          />
+        </div>
       )}
     </div>
   );

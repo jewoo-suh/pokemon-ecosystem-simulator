@@ -96,7 +96,7 @@ export default function LandingPage({ onEnter }) {
             display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap',
           }}
         >
-          {['Python', 'PostgreSQL', 'FastAPI', 'dbt', 'React', 'Three.js'].map(tech => (
+          {['Python', 'PostgreSQL', 'FastAPI', 'dbt', 'React', 'Recharts'].map(tech => (
             <span key={tech} style={{
               padding: '4px 12px', borderRadius: 100,
               background: 'var(--bg-secondary)',

@@ -1,0 +1,45 @@
+import PopulationChart from './dashboard/PopulationChart';
+import TrophicBars from './dashboard/TrophicBars';
+import BiomeDetail from './dashboard/BiomeDetail';
+import EventLog from './dashboard/EventLog';
+
+export default function DataPanel({
+  liveStats,
+  biomeTimeseries,
+  currentTick,
+  tickIdx,
+  selectedBiomeId,
+  onSelectBiome,
+  currentBiomeData,
+  biomeDetails,
+  animFrame,
+}) {
+  return (
+    <div className="data-panel-inner">
+      <PopulationChart
+        biomeTimeseries={biomeTimeseries}
+        currentTick={currentTick}
+        tickIdx={tickIdx}
+        animFrame={animFrame}
+      />
+
+      <TrophicBars trophic={liveStats?.trophic} />
+
+      <BiomeDetail
+        selectedBiomeId={selectedBiomeId}
+        onSelectBiome={onSelectBiome}
+        currentBiomeData={currentBiomeData}
+        biomeDetails={biomeDetails}
+        biomeTimeseries={biomeTimeseries}
+        tickIdx={tickIdx}
+        animFrame={animFrame}
+      />
+
+      <EventLog
+        animFrame={animFrame}
+        selectedBiomeId={selectedBiomeId}
+        biomeTimeseries={biomeTimeseries}
+      />
+    </div>
+  );
+}
