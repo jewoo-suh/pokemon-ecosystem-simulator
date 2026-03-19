@@ -69,45 +69,44 @@ export default function DashboardView() {
     setAnimFrame(frame);
     setCurrentTick(frame.tick);
 
-    // Accumulate population history for the chart
+    // Accumulate population + species history for charts
+    const uniqueSpecies = new Set(frame.species.map(s => s.id)).size;
     setPopHistory(prev => {
+      const entry = { tick: frame.tick, total: frame.total_population, species: uniqueSpecies };
       // If scrubbing backward, trim history
       if (prev.length > 0 && frame.tick <= prev[prev.length - 1].tick) {
         const trimmed = prev.filter(p => p.tick < frame.tick);
-        return [...trimmed, { tick: frame.tick, total: frame.total_population }];
+        return [...trimmed, entry];
       }
-      return [...prev, { tick: frame.tick, total: frame.total_population }];
+      return [...prev, entry];
     });
 
-    // Create toasts for non-season events
+    // Create toasts only for major events (disasters, disease, milestones)
     if (frame.events && frame.events.length > 0) {
-      const tickEvents = frame.events.filter(e => e.type !== 'season_change');
-      if (tickEvents.length > 0) {
-        const disasters = tickEvents.filter(e => e.type === 'disaster');
-        const extinctions = tickEvents.filter(e => e.type === 'extinction');
-        const others = tickEvents.filter(e => e.type !== 'disaster' && e.type !== 'extinction');
+      const majorEvents = frame.events.filter(e =>
+        e.type === 'disaster' || e.type === 'disease' || e.type === 'fire' ||
+        e.type === 'drought' || e.type === 'flood' || e.type === 'bloom'
+      );
+      const extinctions = frame.events.filter(e => e.type === 'extinction');
 
-        const batch = [];
-        for (const e of disasters) batch.push(e);
-        if (extinctions.length <= 2) {
-          for (const e of extinctions) batch.push(e);
-        } else {
-          batch.push(extinctions[0]);
-          batch.push({
-            tick: frame.tick,
-            type: 'extinction',
-            species_name: `+${extinctions.length - 1} more`,
-            detail: `${extinctions.length} species lost habitat this tick`,
-          });
-        }
-        for (const e of others) batch.push(e);
+      const batch = [...majorEvents];
+      // Only show extinction toast if 3+ species went extinct this tick
+      if (extinctions.length >= 3) {
+        batch.push({
+          tick: frame.tick,
+          type: 'extinction',
+          species_name: `${extinctions.length} species`,
+          detail: `${extinctions.length} species went extinct this tick`,
+        });
+      }
 
-        const newToasts = batch.slice(0, 3).map(e => ({
+      if (batch.length > 0) {
+        const newToasts = batch.slice(0, 2).map(e => ({
           ...e,
-          id: `${e.tick}-${e.type}-${e.species_id || ''}-${Math.random().toString(36).slice(2, 6)}`,
+          id: `${e.tick}-${e.type}-${Math.random().toString(36).slice(2, 6)}`,
           createdAt: Date.now(),
         }));
-        setToasts(prev => [...prev, ...newToasts].slice(-3));
+        setToasts(prev => [...prev, ...newToasts].slice(-2));
       }
     }
   }, []);

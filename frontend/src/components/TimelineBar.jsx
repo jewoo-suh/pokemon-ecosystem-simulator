@@ -106,7 +106,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
   const [catalog, setCatalog] = useState(null);
   const [frameIdx, setFrameIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(100);
+  const [speed, setSpeed] = useState(150);
   const timerRef = useRef(null);
   const eventsMapRef = useRef(null);
 
@@ -138,13 +138,6 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
       if (pops[i] > 0) species.push({ ...catalog[i], population: pops[i] });
     }
     const tickEvents = eventsMapRef.current?.get(frame.tick) || [];
-    // Collect all events up to current tick for the event log
-    const allEventsToTick = [];
-    if (eventsMapRef.current) {
-      for (const [tick, evts] of eventsMapRef.current) {
-        if (tick <= frame.tick) allEventsToTick.push(...evts);
-      }
-    }
     if (onFrame) onFrame({
       tick: frame.tick,
       season: frame.season || getSeason(frame.tick),
@@ -152,7 +145,6 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
       total_population: frame.total_population,
       living_species: frame.living_species,
       events: tickEvents,
-      allEvents: allEventsToTick,
     });
   }, [frameIdx, frames, catalog]);
 
@@ -161,7 +153,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
     setFrames(null); setFrameIdx(0); setPlaying(false);
     eventsMapRef.current = null;
     try {
-      const data = await runAnimationFrames(200);
+      const data = await runAnimationFrames();
       setCatalog(data.species);
       setFrames(data.frames);
       setFrameIdx(0);
@@ -275,10 +267,10 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
                 fontSize: 11, padding: '3px 6px',
               }}
             >
-              <option value={200}>0.5x</option>
-              <option value={100}>1x</option>
-              <option value={50}>2x</option>
-              <option value={25}>4x</option>
+              <option value={300}>0.5x</option>
+              <option value={150}>1x</option>
+              <option value={75}>2x</option>
+              <option value={35}>4x</option>
             </select>
 
             <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
