@@ -1,40 +1,30 @@
 import { useState, useCallback } from 'react';
-import IsometricScene from './components/IsometricScene';
-import Sidebar from './components/Sidebar';
-import TimelineBar from './components/TimelineBar';
+import { AnimatePresence, motion } from 'framer-motion';
+import LandingPage from './components/LandingPage';
+import WorldView from './components/WorldView';
+import './styles.css';
 
 function App() {
-  const [selectedSpecies, setSelectedSpecies] = useState(null);
-  const [currentTick, setCurrentTick] = useState(0);
-  const [animFrame, setAnimFrame] = useState(null);
-
-  const handleTicksRun = useCallback((result) => {
-    setCurrentTick(result.end_tick);
-    setSelectedSpecies(null);
-  }, []);
-
-  const handleFrame = useCallback((frame) => {
-    setAnimFrame(frame);
-    setCurrentTick(frame.tick);
-  }, []);
+  const [entered, setEntered] = useState(false);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
-      <IsometricScene
-        onSpeciesClick={(dot) => setSelectedSpecies(dot)}
-        onTickLoaded={setCurrentTick}
-        animFrame={animFrame}
-      />
-      <Sidebar
-        selectedSpecies={selectedSpecies}
-        onClose={() => setSelectedSpecies(null)}
-      />
-      <TimelineBar
-        currentTick={currentTick}
-        onTicksRun={handleTicksRun}
-        onFrame={handleFrame}
-      />
-    </div>
+    <AnimatePresence mode="wait">
+      {!entered ? (
+        <motion.div key="landing" exit={{ opacity: 0 }} transition={{ duration: 0.5 }}>
+          <LandingPage onEnter={() => setEntered(true)} />
+        </motion.div>
+      ) : (
+        <motion.div
+          key="world"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6 }}
+          style={{ height: '100vh', width: '100vw' }}
+        >
+          <WorldView />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

@@ -129,6 +129,27 @@ export async function runAnimationFrames(ticks) {
   }
 }
 
+export async function getEvents() {
+  await detectMode();
+  if (useStatic) {
+    try {
+      const res = await fetch(`${STATIC}/animation_events.json`);
+      if (!res.ok) return [];
+      return res.json();
+    } catch {
+      return [];
+    }
+  } else {
+    try {
+      const res = await fetch(`${API}/simulation/events`);
+      if (!res.ok) return [];
+      return res.json();
+    } catch {
+      return [];
+    }
+  }
+}
+
 export function isStaticMode() {
   return useStatic === true;
 }

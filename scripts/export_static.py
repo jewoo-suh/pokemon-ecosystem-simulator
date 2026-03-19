@@ -432,6 +432,62 @@ def export_animation_frames():
     engine.conn.close()
 
 
+def export_events():
+    """Generate events by analyzing animation frames data."""
+    frames_path = os.path.join(OUTPUT_DIR, "animation_frames.json")
+    if not os.path.exists(frames_path):
+        print("  events: skipped (no animation_frames.json)")
+        return
+
+    with open(frames_path) as f:
+        data = json.load(f)
+
+    catalog = data["species"]
+    frames = data["frames"]
+    events = []
+
+    prev_season = None
+    for i, frame in enumerate(frames):
+        tick = frame["tick"]
+        season = frame.get("season", "spring")
+
+        # Season change
+        if season != prev_season:
+            events.append({"tick": tick, "type": "season_change", "season": season})
+            prev_season = season
+
+        # Extinctions: species+biome population drops to 0
+        if i > 0:
+            prev_pops = frames[i - 1]["populations"]
+            curr_pops = frame["populations"]
+            for j in range(len(catalog)):
+                if j < len(prev_pops) and j < len(curr_pops):
+                    if prev_pops[j] > 0 and curr_pops[j] == 0:
+                        sp = catalog[j]
+                        events.append({
+                            "tick": tick,
+                            "type": "extinction",
+                            "species_id": sp.get("id"),
+                            "species_name": sp.get("name", "?"),
+                            "biome_id": sp.get("biome_id"),
+                            "biome_name": sp.get("biome", "?"),
+                        })
+
+        # Population crash: total drops by >20%
+        if i > 0:
+            prev_total = frames[i - 1]["total_population"]
+            curr_total = frame["total_population"]
+            if prev_total > 100 and (prev_total - curr_total) / prev_total > 0.20:
+                events.append({
+                    "tick": tick,
+                    "type": "disaster",
+                    "detail": f"Population crash: {prev_total:,} \u2192 {curr_total:,}",
+                })
+
+    write_json("animation_events.json", events)
+    print(f"  events: {len(events)} events generated")
+
+
 def write_json(filename, data):
     filepath = os.path.join(OUTPUT_DIR, filename)
     with open(filepath, "w") as f:
@@ -490,6 +546,7 @@ def main():
     export_species()
     export_sprites()
     export_animation_frames()
+    export_events()
 
     # Calculate total size
     total = 0

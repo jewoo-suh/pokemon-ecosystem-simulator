@@ -1,27 +1,33 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 
 const HEIGHT_SCALE = 12;
 const WATER_LEVEL = 0.28;
 const STEPS = 10;
 
-// Bright pastel palette
 const BIOME_PALETTE = {
-  7:  [0.50, 0.75, 0.92],   // sea
-  9:  [0.58, 0.85, 0.80],   // waters-edge
-  2:  [0.45, 0.78, 0.45],   // forest
-  3:  [0.75, 0.88, 0.48],   // grassland
-  6:  [0.82, 0.68, 0.52],   // rough-terrain
-  4:  [0.82, 0.78, 0.82],   // mountain
-  1:  [0.55, 0.45, 0.40],   // cave
-  8:  [0.78, 0.70, 0.85],   // urban
-  5:  [0.90, 0.82, 0.50],   // rare
+  7:  [0.50, 0.75, 0.92],
+  9:  [0.58, 0.85, 0.80],
+  2:  [0.45, 0.78, 0.45],
+  3:  [0.75, 0.88, 0.48],
+  6:  [0.82, 0.68, 0.52],
+  4:  [0.82, 0.78, 0.82],
+  1:  [0.55, 0.45, 0.40],
+  8:  [0.78, 0.70, 0.85],
+  5:  [0.90, 0.82, 0.50],
 };
 
 const ORIG_COLORS = {
   7: [30, 100, 200], 9: [70, 170, 190], 2: [34, 120, 50],
   3: [140, 180, 60], 6: [150, 110, 70], 4: [160, 160, 170],
   1: [80, 60, 50], 8: [130, 100, 150], 5: [220, 190, 60],
+};
+
+const SEASON_TINTS = {
+  spring: [1.02, 1.08, 1.00],
+  summer: [1.08, 1.02, 0.94],
+  autumn: [1.14, 0.95, 0.80],
+  winter: [0.90, 0.95, 1.10],
 };
 
 export function matchBaseId(rawColor) {
@@ -38,7 +44,9 @@ function terraceElevation(elev) {
   return Math.round(elev * STEPS) / STEPS;
 }
 
-export default function TerrainMesh({ mapData }) {
+export default function TerrainMesh({ mapData, season }) {
+  const meshRef = useRef();
+  const originalColorsRef = useRef(null);
   const { width, height, grid, elevation, biome_colors } = mapData;
 
   const biomeColorMap = useMemo(() => {
@@ -82,8 +90,33 @@ export default function TerrainMesh({ mapData }) {
     return geo;
   }, [mapData, biomeColorMap]);
 
+  // Store original colors once
+  useEffect(() => {
+    if (geometry) {
+      const colors = geometry.attributes.color;
+      if (colors && !originalColorsRef.current) {
+        originalColorsRef.current = new Float32Array(colors.array);
+      }
+    }
+  }, [geometry]);
+
+  // Apply seasonal tint to vertex colors
+  useEffect(() => {
+    if (!originalColorsRef.current || !geometry) return;
+    const colors = geometry.attributes.color;
+    const orig = originalColorsRef.current;
+    const tint = SEASON_TINTS[season] || SEASON_TINTS.spring;
+
+    for (let i = 0; i < orig.length; i += 3) {
+      colors.array[i]     = Math.min(1, orig[i]     * tint[0]);
+      colors.array[i + 1] = Math.min(1, orig[i + 1] * tint[1]);
+      colors.array[i + 2] = Math.min(1, orig[i + 2] * tint[2]);
+    }
+    colors.needsUpdate = true;
+  }, [season, geometry]);
+
   return (
-    <mesh geometry={geometry}>
+    <mesh ref={meshRef} geometry={geometry}>
       <meshPhongMaterial vertexColors side={THREE.DoubleSide} shininess={5} flatShading />
     </mesh>
   );
