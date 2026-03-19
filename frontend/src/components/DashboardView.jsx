@@ -34,6 +34,7 @@ export default function DashboardView() {
   const [selectedBiomeId, setSelectedBiomeId] = useState(null);
   const [hoveredBiomeId, setHoveredBiomeId] = useState(null);
   const [mapColorMode, setMapColorMode] = useState('biome');
+  const [selectedSpeciesId, setSelectedSpeciesId] = useState(null);
 
   // Load data on mount
   useEffect(() => {
@@ -195,7 +196,9 @@ export default function DashboardView() {
             biomeDetails={biomeDetails}
             events={animFrame?.events}
             animFrame={animFrame}
+            selectedSpeciesId={selectedSpeciesId}
           />
+
         </div>
 
         {/* Right: Data Panel */}
@@ -211,6 +214,8 @@ export default function DashboardView() {
             currentBiomeData={currentBiomeData}
             biomeDetails={biomeDetails}
             animFrame={animFrame}
+            selectedSpeciesId={selectedSpeciesId}
+            onSelectSpecies={setSelectedSpeciesId}
           />
         </div>
       </div>

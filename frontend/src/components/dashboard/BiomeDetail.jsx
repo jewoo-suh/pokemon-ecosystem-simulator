@@ -18,6 +18,8 @@ export default function BiomeDetail({
   biomeTimeseries,
   tickIdx,
   animFrame,
+  selectedSpeciesId,
+  onSelectSpecies,
 }) {
   // Get species list for the selected biome (or global top-10)
   const { title, speciesList, biomePopulation, biomeCapacity } = useMemo(() => {
@@ -76,22 +78,41 @@ export default function BiomeDetail({
         <div className="panel-title" style={{ marginBottom: 0, textTransform: 'capitalize' }}>
           {title}
         </div>
-        {selectedBiomeId != null && (
-          <button
-            onClick={() => onSelectBiome(null)}
-            style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid rgba(0,0,0,0.06)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '2px 8px',
-              fontSize: 10,
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            Clear
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          {selectedSpeciesId != null && (
+            <button
+              onClick={() => onSelectSpecies(null)}
+              style={{
+                background: 'var(--accent-bg)',
+                border: '1px solid var(--accent-light)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '2px 8px',
+                fontSize: 10,
+                color: 'var(--accent)',
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              Tracking #{selectedSpeciesId} &times;
+            </button>
+          )}
+          {selectedBiomeId != null && (
+            <button
+              onClick={() => { onSelectBiome(null); onSelectSpecies(null); }}
+              style={{
+                background: 'var(--bg-secondary)',
+                border: '1px solid rgba(0,0,0,0.06)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '2px 8px',
+                fontSize: 10,
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Capacity gauge */}
@@ -124,8 +145,14 @@ export default function BiomeDetail({
             {speciesList.map(sp => {
               const badge = TROPHIC_BADGES[sp.trophic] || TROPHIC_BADGES.producer;
               const popPct = (sp.population / maxPop) * 100;
+              const isSelected = selectedSpeciesId === sp.id;
               return (
-                <div key={sp.id} className="species-row">
+                <div
+                  key={sp.id}
+                  className={`species-row ${isSelected ? 'species-row-selected' : ''}`}
+                  onClick={() => onSelectSpecies(isSelected ? null : sp.id)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <img
                     src={`${SPRITE_BASE}${sp.id}.png`}
                     alt={sp.name}

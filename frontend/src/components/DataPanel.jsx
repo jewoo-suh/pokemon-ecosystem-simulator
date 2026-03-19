@@ -14,6 +14,8 @@ export default function DataPanel({
   currentBiomeData,
   biomeDetails,
   animFrame,
+  selectedSpeciesId,
+  onSelectSpecies,
 }) {
   return (
     <div className="data-panel-inner">
@@ -32,6 +34,8 @@ export default function DataPanel({
         biomeTimeseries={biomeTimeseries}
         tickIdx={tickIdx}
         animFrame={animFrame}
+        selectedSpeciesId={selectedSpeciesId}
+        onSelectSpecies={onSelectSpecies}
       />
 
       <EventLog

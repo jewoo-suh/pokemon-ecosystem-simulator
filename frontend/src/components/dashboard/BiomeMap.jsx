@@ -68,6 +68,7 @@ export default function BiomeMap({
   biomeDetails,
   events,
   animFrame,
+  selectedSpeciesId,
 }) {
   const canvasRef = useRef(null);
   const terrainCacheRef = useRef(null);
@@ -124,13 +125,18 @@ export default function BiomeMap({
   const dots = useMemo(() => {
     if (!animFrame?.species || !dotSlots) return [];
     const result = [];
+    const tracking = selectedSpeciesId != null;
     for (const sp of animFrame.species) {
       const key = `${sp.id}-${sp.biome_id}`;
       const slot = dotSlots[key];
       if (!slot) continue;
 
+      // If tracking a species, only show that species
+      if (tracking && sp.id !== selectedSpeciesId) continue;
+
       const numDots = Math.max(1, Math.min(MAX_DOTS_PER_ENTRY, Math.ceil(sp.population / 50)));
-      const rgb = TROPHIC_COLORS_RGB[sp.trophic] || TROPHIC_COLORS_RGB.producer;
+      // When tracking, use high-contrast black dots; otherwise trophic colors
+      const rgb = tracking ? [20, 20, 20] : (TROPHIC_COLORS_RGB[sp.trophic] || TROPHIC_COLORS_RGB.producer);
       for (let i = 0; i < numDots; i++) {
         result.push({
           x: slot.positions[i].x,
@@ -140,7 +146,7 @@ export default function BiomeMap({
       }
     }
     return result;
-  }, [animFrame?.species, dotSlots]);
+  }, [animFrame?.species, dotSlots, selectedSpeciesId]);
 
   // Biome ID to timeseries index lookup
   const biomeIdxMap = useMemo(() => {
@@ -255,11 +261,23 @@ export default function BiomeMap({
 
     // Draw population dots
     if (dots.length > 0) {
+      const tracking = selectedSpeciesId != null;
+      const dotRadius = tracking ? 2.2 : 1.3;
       for (const dot of dots) {
-        ctx.fillStyle = `rgba(${dot.rgb[0]},${dot.rgb[1]},${dot.rgb[2]},0.85)`;
+        ctx.fillStyle = `rgba(${dot.rgb[0]},${dot.rgb[1]},${dot.rgb[2]},${tracking ? 1.0 : 0.85})`;
         ctx.beginPath();
-        ctx.arc(dot.x, dot.y, 1.3, 0, Math.PI * 2);
+        ctx.arc(dot.x, dot.y, dotRadius, 0, Math.PI * 2);
         ctx.fill();
+      }
+      // Add white outline ring for tracked dots
+      if (tracking) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 0.5;
+        for (const dot of dots) {
+          ctx.beginPath();
+          ctx.arc(dot.x, dot.y, 3, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
     }
 
@@ -298,7 +316,7 @@ export default function BiomeMap({
         }
       }
     }
-  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells, dots]);
+  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells, dots, selectedSpeciesId]);
 
   // Mouse handling
   const handleMouseMove = useCallback((e) => {

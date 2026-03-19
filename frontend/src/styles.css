@@ -299,6 +299,11 @@ h1, h2, h3 {
   background: var(--bg-secondary);
 }
 
+.species-row-selected {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-light);
+}
+
 /* ---- Responsive ---- */
 
 @media (max-width: 800px) {
