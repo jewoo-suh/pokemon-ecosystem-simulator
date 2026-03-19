@@ -368,30 +368,90 @@ def export_animation_frames():
         biome_names[row[0]] = row[1]
     cur.close()
 
-    ticks = 200  # 2 full years of seasonal data
-    tick_pops = []
+    ticks = 10000  # 100 years of seasonal data
+    ANIM_SAMPLE = 25  # store every 25th tick for animation (400 frames)
+    TS_SAMPLE = 5     # store every 5th tick for biome timeseries (2000 points)
 
+    keys = engine.keys
+
+    # Pre-build biome membership for timeseries aggregation
+    biome_ids_set = set()
+    for entry in keys:
+        biome_ids_set.add(entry[1])
+    biome_id_list = sorted(biome_ids_set)
+    biome_members = {bid: [] for bid in biome_id_list}
+    for idx, (pid, bid) in enumerate(keys):
+        if bid in biome_members:
+            biome_members[bid].append(idx)
+
+    # Carrying capacities for food approximation
+    carrying_caps = {}
+    cur = engine.conn.cursor()
+    cur.execute("SELECT id, carrying_capacity FROM biomes")
+    for row in cur.fetchall():
+        carrying_caps[row[0]] = row[1]
+    cur.close()
+
+    # Collect sampled data in one pass
+    tick_pops = []       # sampled for animation frames
+    ts_pop = [[] for _ in biome_id_list]   # biome x sampled_tick
+    ts_food = [[] for _ in biome_id_list]
+    ts_spp = [[] for _ in biome_id_list]
+    ts_ticks = []
+    ts_events = []
+    prev_season = None
+
+    print(f"  Running {ticks} ticks (sampling anim every {ANIM_SAMPLE}, timeseries every {TS_SAMPLE})...")
     for i in range(ticks):
         current_tick += 1
         engine._run_tick(current_tick)
 
         season_name, _ = engine.get_season(current_tick)
         alive_mask = engine.pop > 0
-        alive_idx = np.where(alive_mask)[0]
-        tick_pops.append({
-            "tick": current_tick,
-            "season": season_name,
-            "pops": {int(j): int(engine.pop[j]) for j in alive_idx},
-            "total_population": int(engine.pop[alive_mask].sum()),
-            "living_species": int(alive_mask.sum()),
-        })
 
-    # Build catalog
+        # Season events (every tick, for timeseries)
+        if season_name != prev_season:
+            ts_events.append({"tick": current_tick, "type": "season_change", "season": season_name})
+            prev_season = season_name
+
+        # Animation frame sampling
+        if current_tick % ANIM_SAMPLE == 0 or current_tick == 1:
+            alive_idx = np.where(alive_mask)[0]
+            tick_pops.append({
+                "tick": current_tick,
+                "season": season_name,
+                "pops": {int(j): int(engine.pop[j]) for j in alive_idx},
+                "total_population": int(engine.pop[alive_mask].sum()),
+                "living_species": int(alive_mask.sum()),
+            })
+
+        # Biome timeseries sampling
+        if current_tick % TS_SAMPLE == 0 or current_tick == 1:
+            ts_ticks.append(current_tick)
+            for bi, bid in enumerate(biome_id_list):
+                biome_pop = 0
+                biome_spp = 0
+                for idx in biome_members[bid]:
+                    p = int(engine.pop[idx])
+                    if p > 0:
+                        biome_pop += p
+                        biome_spp += 1
+                ts_pop[bi].append(biome_pop)
+                ts_spp[bi].append(biome_spp)
+                cap = carrying_caps.get(bid, 10000)
+                ratio = min(biome_pop / max(cap, 1), 2.0)
+                ts_food[bi].append(round(max(0.0, min(1.0, 1.0 - ratio * 0.5)), 2))
+
+        # Progress logging
+        if current_tick % 1000 == 0:
+            total_pop = int(engine.pop[alive_mask].sum())
+            print(f"    tick {current_tick}: {total_pop:,} pop, {int(alive_mask.sum())} entries alive")
+
+    # --- Build animation_frames.json ---
     all_seen = set()
     for tp in tick_pops:
         all_seen.update(tp["pops"].keys())
 
-    keys = engine.keys
     catalog = []
     idx_to_catalog = {}
     for ci, idx in enumerate(sorted(all_seen)):
@@ -430,91 +490,17 @@ def export_animation_frames():
     print(f"  animation: {len(frames)} frames, {len(catalog)} species in catalog")
 
     # --- Generate biome_timeseries.json ---
-    # Aggregate per-biome-per-tick data for the dashboard
-    biome_ids_set = set()
-    for entry in keys:
-        biome_ids_set.add(entry[1])
-    biome_id_list = sorted(biome_ids_set)
-    biome_id_to_idx = {bid: i for i, bid in enumerate(biome_id_list)}
-
-    num_biomes = len(biome_id_list)
-    num_ticks = len(tick_pops)
-
-    # Build biome membership: for each biome, which indices in keys belong to it
-    biome_members = {bid: [] for bid in biome_id_list}
-    for idx, (pid, bid) in enumerate(keys):
-        if bid in biome_members:
-            biome_members[bid].append(idx)
-
-    # Re-run simulation to capture food data (engine.food was overwritten each tick)
-    # We already have population from tick_pops, so just need to re-aggregate
-    # Actually tick_pops has per-index populations, we can aggregate from that
-    pop_matrix = []  # biome x tick
-    food_matrix = []  # biome x tick (placeholder - need food from engine)
-    spp_matrix = []  # biome x tick
-
-    for bi, bid in enumerate(biome_id_list):
-        members = biome_members[bid]
-        pop_row = []
-        spp_row = []
-        for ti, tp in enumerate(tick_pops):
-            biome_pop = 0
-            biome_spp = 0
-            for idx in members:
-                p = tp["pops"].get(idx, 0)
-                if p > 0:
-                    biome_pop += p
-                    biome_spp += 1
-            pop_row.append(biome_pop)
-            spp_row.append(biome_spp)
-        pop_matrix.append(pop_row)
-        spp_matrix.append(spp_row)
-
-    # For food, we don't have per-tick food stored. Use a placeholder approach:
-    # Re-run the sim once more to capture food, OR estimate from population dynamics.
-    # Since the engine overwrites arrays, we'll store avg_food as population-based proxy.
-    # When the user re-runs export_static.py, food data will be captured.
-    # For now, generate approximate food from carrying capacity ratios.
-    carrying_caps = {}
-    cur = engine.conn.cursor()
-    cur.execute("SELECT id, carrying_capacity FROM biomes")
-    for row in cur.fetchall():
-        carrying_caps[row[0]] = row[1]
-    cur.close()
-
-    for bi, bid in enumerate(biome_id_list):
-        cap = carrying_caps.get(bid, 10000)
-        food_row = []
-        for ti in range(num_ticks):
-            pop = pop_matrix[bi][ti]
-            # Approximate food satiation as inverse of population pressure
-            ratio = min(pop / max(cap, 1), 2.0)
-            food_approx = round(max(0.0, min(1.0, 1.0 - ratio * 0.5)), 2)
-            food_row.append(food_approx)
-        food_matrix.append(food_row)
-
-    # Collect events with biome info
-    biome_events = []
-    # Re-use the event generation from export_events logic
-    prev_season = None
-    for ti, tp in enumerate(tick_pops):
-        tick = tp["tick"]
-        season = tp.get("season", "spring") if "season" in tp else getSeason_py(tick)
-        if season != prev_season:
-            biome_events.append({"tick": tick, "type": "season_change", "season": season})
-            prev_season = season
-
     biome_ts = {
         "biome_ids": biome_id_list,
         "biome_names": [biome_names.get(bid, "?") for bid in biome_id_list],
-        "ticks": list(range(1, num_ticks + 1)),
-        "population": pop_matrix,
-        "avg_food": food_matrix,
-        "species_count": spp_matrix,
-        "events": biome_events,
+        "ticks": ts_ticks,
+        "population": ts_pop,
+        "avg_food": ts_food,
+        "species_count": ts_spp,
+        "events": ts_events,
     }
     write_json("biome_timeseries.json", biome_ts)
-    print(f"  biome timeseries: {num_biomes} biomes x {num_ticks} ticks")
+    print(f"  biome timeseries: {len(biome_id_list)} biomes x {len(ts_ticks)} sampled ticks")
 
     engine.conn.close()
 

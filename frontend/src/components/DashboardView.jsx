@@ -151,10 +151,19 @@ export default function DashboardView() {
     return biomes;
   }, [animFrame]);
 
-  // Determine current tick index for timeseries
-  const timeseriesTickIdx = biomeTimeseries
-    ? Math.max(0, Math.min(currentTick - 1, biomeTimeseries.ticks.length - 1))
-    : 0;
+  // Determine current tick index for timeseries (find closest sampled tick)
+  const timeseriesTickIdx = useMemo(() => {
+    if (!biomeTimeseries || !biomeTimeseries.ticks.length) return 0;
+    const ticks = biomeTimeseries.ticks;
+    // Binary search for closest tick <= currentTick
+    let lo = 0, hi = ticks.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (ticks[mid] <= currentTick) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }, [biomeTimeseries, currentTick]);
 
   const season = animFrame?.season || getSeason(currentTick);
 
