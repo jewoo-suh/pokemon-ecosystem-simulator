@@ -527,6 +527,15 @@ def export_events():
     frames = data["frames"]
     events = []
 
+    # Build species_id -> catalog indices map
+    species_indices = {}
+    for j, sp in enumerate(catalog):
+        sid = sp.get("id")
+        if sid not in species_indices:
+            species_indices[sid] = []
+        species_indices[sid].append(j)
+    extinct_species = set()
+
     prev_season = None
     for i, frame in enumerate(frames):
         tick = frame["tick"]
@@ -537,22 +546,21 @@ def export_events():
             events.append({"tick": tick, "type": "season_change", "season": season})
             prev_season = season
 
-        # Extinctions: species+biome population drops to 0
+        # Extinctions: species gone from ALL biomes (true extinction)
         if i > 0:
-            prev_pops = frames[i - 1]["populations"]
             curr_pops = frame["populations"]
-            for j in range(len(catalog)):
-                if j < len(prev_pops) and j < len(curr_pops):
-                    if prev_pops[j] > 0 and curr_pops[j] == 0:
-                        sp = catalog[j]
-                        events.append({
-                            "tick": tick,
-                            "type": "extinction",
-                            "species_id": sp.get("id"),
-                            "species_name": sp.get("name", "?"),
-                            "biome_id": sp.get("biome_id"),
-                            "biome_name": sp.get("biome", "?"),
-                        })
+            for species_id, indices in species_indices.items():
+                if species_id in extinct_species:
+                    continue
+                if all(curr_pops[j] == 0 for j in indices if j < len(curr_pops)):
+                    extinct_species.add(species_id)
+                    sp = catalog[indices[0]]
+                    events.append({
+                        "tick": tick,
+                        "type": "extinction",
+                        "species_id": sp.get("id"),
+                        "species_name": sp.get("name", "?"),
+                    })
 
         # Population crash: total drops by >20%
         if i > 0:
