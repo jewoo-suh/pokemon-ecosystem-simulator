@@ -6,10 +6,19 @@ function generateEventsFromFrames(frames, catalog) {
   const events = [];
   let prevSeason = null;
 
+  // Pre-build index: species_id -> catalog indices (for full-extinction check)
+  const speciesIndices = new Map();
+  for (let j = 0; j < catalog.length; j++) {
+    const id = catalog[j].id;
+    if (!speciesIndices.has(id)) speciesIndices.set(id, []);
+    speciesIndices.get(id).push(j);
+  }
+
   for (let i = 0; i < frames.length; i++) {
     const frame = frames[i];
     const season = frame.season || getSeason(frame.tick);
 
+    // Season change
     if (season !== prevSeason) {
       events.push({ tick: frame.tick, type: 'season_change', season });
       prevSeason = season;
@@ -18,34 +27,68 @@ function generateEventsFromFrames(frames, catalog) {
     if (i > 0) {
       const prevPops = frames[i - 1].populations;
       const currPops = frame.populations;
-      // Track unique species extinctions per tick (not per biome)
-      const extinctThisTick = new Map();
+
+      // Biome-level extinctions (species had meaningful pop then hit 0 in a biome)
+      const reportedSpecies = new Set();
       for (let j = 0; j < catalog.length; j++) {
-        if (prevPops[j] > 0 && currPops[j] === 0) {
+        if (prevPops[j] >= 10 && currPops[j] === 0) {
           const sp = catalog[j];
-          const key = sp.id;
-          // Only report extinction if ALL biome populations for this species are 0
-          if (!extinctThisTick.has(key)) {
-            // Check if species still alive in any other biome
-            const stillAlive = catalog.some((c, k) =>
-              c.id === sp.id && k !== j && currPops[k] > 0
-            );
-            if (!stillAlive) {
-              extinctThisTick.set(key, {
-                tick: frame.tick,
-                type: 'extinction',
-                species_id: sp.id,
-                species_name: sp.name,
-                biome_id: sp.biome_id,
-                biome_name: sp.biome,
-              });
-            }
+
+          // Check if fully extinct (all biomes)
+          const indices = speciesIndices.get(sp.id);
+          const fullyExtinct = indices.every(k => currPops[k] === 0);
+
+          if (fullyExtinct && !reportedSpecies.has(sp.id)) {
+            reportedSpecies.add(sp.id);
+            events.push({
+              tick: frame.tick,
+              type: 'extinction',
+              species_id: sp.id,
+              species_name: sp.name,
+              biome_id: sp.biome_id,
+              biome_name: sp.biome,
+              detail: `${sp.name} is now globally extinct`,
+            });
+          } else if (!fullyExtinct) {
+            events.push({
+              tick: frame.tick,
+              type: 'extinction',
+              species_id: sp.id,
+              species_name: sp.name,
+              biome_id: sp.biome_id,
+              biome_name: sp.biome,
+              detail: `Lost ${prevPops[j]} in ${sp.biome}`,
+            });
           }
         }
       }
-      events.push(...extinctThisTick.values());
+
+      // Population crash: total drops >5% in one tick
+      const prevTotal = frames[i - 1].total_population;
+      const currTotal = frame.total_population;
+      if (prevTotal > 100) {
+        const dropPct = (prevTotal - currTotal) / prevTotal;
+        if (dropPct > 0.05) {
+          events.push({
+            tick: frame.tick,
+            type: 'disaster',
+            detail: `Pop ${Math.round(dropPct * 100)}% drop (${prevTotal.toLocaleString()} \u2192 ${currTotal.toLocaleString()})`,
+          });
+        }
+      }
     }
   }
+
+  // Cap: if too many events, keep the most important ones
+  // (full extinctions > disasters > biome extinctions > season changes)
+  if (events.length > 2000) {
+    const priority = { extinction: 1, disaster: 2, season_change: 3 };
+    events.sort((a, b) => (priority[a.type] || 4) - (priority[b.type] || 4));
+    events.length = 2000;
+    events.sort((a, b) => a.tick - b.tick);
+  }
+
+  console.log(`[Events] Generated: ${events.length} total`);
   return events;
 }
 

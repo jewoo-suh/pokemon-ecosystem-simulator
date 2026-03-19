@@ -49,14 +49,35 @@ export default function WorldView() {
 
     // Create toasts for non-season events
     if (frame.events && frame.events.length > 0) {
-      const newToasts = frame.events
-        .filter(e => e.type !== 'season_change')
-        .map(e => ({
+      const tickEvents = frame.events.filter(e => e.type !== 'season_change');
+      if (tickEvents.length > 0) {
+        // If many extinctions on one tick, batch into one toast
+        const disasters = tickEvents.filter(e => e.type === 'disaster');
+        const extinctions = tickEvents.filter(e => e.type === 'extinction');
+        const others = tickEvents.filter(e => e.type !== 'disaster' && e.type !== 'extinction');
+
+        const batch = [];
+        // Show disasters individually
+        for (const e of disasters) batch.push(e);
+        // Show up to 2 individual extinctions, batch the rest
+        if (extinctions.length <= 2) {
+          for (const e of extinctions) batch.push(e);
+        } else {
+          batch.push(extinctions[0]);
+          batch.push({
+            tick: frame.tick,
+            type: 'extinction',
+            species_name: `+${extinctions.length - 1} more`,
+            detail: `${extinctions.length} species lost habitat this tick`,
+          });
+        }
+        for (const e of others) batch.push(e);
+
+        const newToasts = batch.slice(0, 3).map(e => ({
           ...e,
           id: `${e.tick}-${e.type}-${e.species_id || ''}-${Math.random().toString(36).slice(2, 6)}`,
           createdAt: Date.now(),
         }));
-      if (newToasts.length > 0) {
         setToasts(prev => [...prev, ...newToasts].slice(-3));
       }
     }
