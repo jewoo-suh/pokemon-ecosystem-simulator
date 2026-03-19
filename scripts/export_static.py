@@ -369,7 +369,7 @@ def export_animation_frames():
     cur.close()
 
     ticks = 10000  # 100 years of seasonal data
-    ANIM_SAMPLE = 25  # store every 25th tick for animation (400 frames)
+    ANIM_SAMPLE = 10  # store every 10th tick for animation (~1000 frames)
     TS_SAMPLE = 5     # store every 5th tick for biome timeseries (2000 points)
 
     keys = engine.keys

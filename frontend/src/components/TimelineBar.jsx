@@ -106,7 +106,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
   const [catalog, setCatalog] = useState(null);
   const [frameIdx, setFrameIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(150);
+  const [speed, setSpeed] = useState(250);
   const timerRef = useRef(null);
   const eventsMapRef = useRef(null);
 
@@ -267,10 +267,10 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
                 fontSize: 11, padding: '3px 6px',
               }}
             >
-              <option value={300}>0.5x</option>
-              <option value={150}>1x</option>
-              <option value={75}>2x</option>
-              <option value={35}>4x</option>
+              <option value={500}>0.5x</option>
+              <option value={250}>1x</option>
+              <option value={125}>2x</option>
+              <option value={60}>4x</option>
             </select>
 
             <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>

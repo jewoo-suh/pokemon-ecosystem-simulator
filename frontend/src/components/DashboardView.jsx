@@ -50,7 +50,7 @@ export default function DashboardView() {
   useEffect(() => {
     if (toasts.length === 0) return;
     toastTimerRef.current = setInterval(() => {
-      setToasts(prev => prev.filter(t => Date.now() - t.createdAt < 3500));
+      setToasts(prev => prev.filter(t => Date.now() - t.createdAt < 6000));
     }, 500);
     return () => clearInterval(toastTimerRef.current);
   }, [toasts.length > 0]);
