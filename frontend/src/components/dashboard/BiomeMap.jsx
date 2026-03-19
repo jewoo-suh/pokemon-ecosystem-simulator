@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 
 const SCALE = 3;
+const MAX_DOTS_PER_ENTRY = 20;
 
 const COLOR_MODES = [
   { key: 'biome', label: 'Biome' },
@@ -9,9 +10,15 @@ const COLOR_MODES = [
   { key: 'diversity', label: 'Diversity' },
 ];
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
+const TROPHIC_COLORS_RGB = {
+  producer: [106, 191, 105],
+  primary_consumer: [91, 155, 213],
+  secondary_consumer: [232, 148, 74],
+  apex_predator: [232, 107, 138],
+  decomposer: [139, 107, 191],
+};
+
+function lerp(a, b, t) { return a + (b - a) * t; }
 
 function colorLerp(c1, c2, t) {
   return [
@@ -22,22 +29,29 @@ function colorLerp(c1, c2, t) {
 }
 
 function popColor(value, max) {
-  // white -> purple sequential scale
   const t = max > 0 ? Math.min(value / max, 1) : 0;
   return colorLerp([245, 240, 255], [106, 50, 180], t);
 }
 
 function foodColor(value) {
-  // green (>0.7) -> yellow (0.4-0.7) -> red (<0.4)
   if (value >= 0.7) return colorLerp([255, 220, 50], [80, 180, 80], (value - 0.7) / 0.3);
   if (value >= 0.4) return colorLerp([220, 80, 60], [255, 220, 50], (value - 0.4) / 0.3);
   return colorLerp([180, 40, 40], [220, 80, 60], value / 0.4);
 }
 
 function diversityColor(value, max) {
-  // white -> blue
   const t = max > 0 ? Math.min(value / max, 1) : 0;
   return colorLerp([240, 245, 255], [40, 80, 180], t);
+}
+
+// Seeded RNG for consistent dot positions
+function mulberry32(seed) {
+  let t = seed + 0x6D2B79F5;
+  return function () {
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 export default function BiomeMap({
@@ -53,6 +67,7 @@ export default function BiomeMap({
   onHoverBiome,
   biomeDetails,
   events,
+  animFrame,
 }) {
   const canvasRef = useRef(null);
   const terrainCacheRef = useRef(null);
@@ -72,6 +87,60 @@ export default function BiomeMap({
     }
     return cells;
   }, [mapData]);
+
+  // Pre-compute dot slot positions per species-biome combo
+  // Each gets MAX_DOTS_PER_ENTRY random positions within the biome's cells
+  const dotSlots = useMemo(() => {
+    if (!biomeCells || !biomeDetails) return null;
+    const rng = mulberry32(42);
+    const slots = {};
+
+    for (const [bidStr, detail] of Object.entries(biomeDetails)) {
+      const bid = Number(bidStr);
+      const cells = biomeCells[bid];
+      if (!cells || cells.length === 0) continue;
+
+      if (!detail.species) continue;
+      for (const sp of detail.species) {
+        const key = `${sp.pokemon_id}-${bid}`;
+        const positions = [];
+        for (let i = 0; i < MAX_DOTS_PER_ENTRY; i++) {
+          const cell = cells[Math.floor(rng() * cells.length)];
+          positions.push({
+            x: cell.x * SCALE + Math.floor(rng() * SCALE),
+            y: cell.y * SCALE + Math.floor(rng() * SCALE),
+          });
+        }
+        slots[key] = {
+          positions,
+          trophic: sp.trophic_level,
+        };
+      }
+    }
+    return slots;
+  }, [biomeCells, biomeDetails]);
+
+  // Build current dots from animFrame species data
+  const dots = useMemo(() => {
+    if (!animFrame?.species || !dotSlots) return [];
+    const result = [];
+    for (const sp of animFrame.species) {
+      const key = `${sp.id}-${sp.biome_id}`;
+      const slot = dotSlots[key];
+      if (!slot) continue;
+
+      const numDots = Math.max(1, Math.min(MAX_DOTS_PER_ENTRY, Math.ceil(sp.population / 50)));
+      const rgb = TROPHIC_COLORS_RGB[sp.trophic] || TROPHIC_COLORS_RGB.producer;
+      for (let i = 0; i < numDots; i++) {
+        result.push({
+          x: slot.positions[i].x,
+          y: slot.positions[i].y,
+          rgb,
+        });
+      }
+    }
+    return result;
+  }, [animFrame?.species, dotSlots]);
 
   // Biome ID to timeseries index lookup
   const biomeIdxMap = useMemo(() => {
@@ -96,7 +165,6 @@ export default function BiomeMap({
     return vals;
   }, [biomeTimeseries, tickIdx]);
 
-  // Maxes for normalization
   const maxPop = useMemo(() => {
     if (!currentValues) return 1;
     return Math.max(1, ...Object.values(currentValues).map(v => v.population));
@@ -120,7 +188,7 @@ export default function BiomeMap({
     return () => clearTimeout(timer);
   }, [events]);
 
-  // Cache terrain (biome mode) ImageData
+  // Cache terrain ImageData
   useEffect(() => {
     if (!mapData) return;
     const { width, height, grid, biome_colors } = mapData;
@@ -161,7 +229,6 @@ export default function BiomeMap({
     if (colorMode === 'biome' && terrainCacheRef.current) {
       ctx.putImageData(terrainCacheRef.current, 0, 0);
     } else if (currentValues) {
-      // Data-driven coloring
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const biomeId = grid[y * width + x];
@@ -178,21 +245,22 @@ export default function BiomeMap({
           } else {
             color = biome_colors[String(biomeId)] || [0, 0, 0];
           }
-          for (let sy = 0; sy < SCALE; sy++) {
-            for (let sx = 0; sx < SCALE; sx++) {
-              const px = x * SCALE + sx;
-              const py = y * SCALE + sy;
-              const idx = (py * w + px) * 4;
-              ctx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
-            }
-          }
-          // Batch fill as a rect for performance
           ctx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
           ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
         }
       }
     } else if (terrainCacheRef.current) {
       ctx.putImageData(terrainCacheRef.current, 0, 0);
+    }
+
+    // Draw population dots
+    if (dots.length > 0) {
+      for (const dot of dots) {
+        ctx.fillStyle = `rgba(${dot.rgb[0]},${dot.rgb[1]},${dot.rgb[2]},0.85)`;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, 1.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Highlight selected biome
@@ -207,7 +275,7 @@ export default function BiomeMap({
       }
     }
 
-    // Highlight hovered biome (subtle)
+    // Highlight hovered biome
     if (hoveredBiomeId != null && hoveredBiomeId !== selectedBiomeId && biomeCells) {
       const cells = biomeCells[hoveredBiomeId];
       if (cells) {
@@ -230,7 +298,7 @@ export default function BiomeMap({
         }
       }
     }
-  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells]);
+  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells, dots]);
 
   // Mouse handling
   const handleMouseMove = useCallback((e) => {

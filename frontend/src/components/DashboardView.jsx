@@ -27,6 +27,9 @@ export default function DashboardView() {
   const [toasts, setToasts] = useState([]);
   const toastTimerRef = useRef(null);
 
+  // Population history — grows as animation plays
+  const [popHistory, setPopHistory] = useState([]);
+
   // Interaction state
   const [selectedBiomeId, setSelectedBiomeId] = useState(null);
   const [hoveredBiomeId, setHoveredBiomeId] = useState(null);
@@ -60,10 +63,21 @@ export default function DashboardView() {
     if (!frame) {
       setAnimFrame(null);
       setToasts([]);
+      setPopHistory([]);
       return;
     }
     setAnimFrame(frame);
     setCurrentTick(frame.tick);
+
+    // Accumulate population history for the chart
+    setPopHistory(prev => {
+      // If scrubbing backward, trim history
+      if (prev.length > 0 && frame.tick <= prev[prev.length - 1].tick) {
+        const trimmed = prev.filter(p => p.tick < frame.tick);
+        return [...trimmed, { tick: frame.tick, total: frame.total_population }];
+      }
+      return [...prev, { tick: frame.tick, total: frame.total_population }];
+    });
 
     // Create toasts for non-season events
     if (frame.events && frame.events.length > 0) {
@@ -172,6 +186,7 @@ export default function DashboardView() {
             onHoverBiome={setHoveredBiomeId}
             biomeDetails={biomeDetails}
             events={animFrame?.events}
+            animFrame={animFrame}
           />
         </div>
 
@@ -180,6 +195,7 @@ export default function DashboardView() {
           <DataPanel
             liveStats={liveStats}
             biomeTimeseries={biomeTimeseries}
+            popHistory={popHistory}
             currentTick={currentTick}
             tickIdx={timeseriesTickIdx}
             selectedBiomeId={selectedBiomeId}

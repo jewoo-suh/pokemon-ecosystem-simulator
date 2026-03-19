@@ -1,55 +1,15 @@
-import { useMemo } from 'react';
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine,
+  AreaChart, Area, XAxis, YAxis, Tooltip,
   ResponsiveContainer,
 } from 'recharts';
 
-const TROPHIC_ORDER = ['producer', 'primary_consumer', 'secondary_consumer', 'apex_predator', 'decomposer'];
-const TROPHIC_COLORS = {
-  producer: 'var(--trophic-producer)',
-  primary_consumer: 'var(--trophic-primary)',
-  secondary_consumer: 'var(--trophic-secondary)',
-  apex_predator: 'var(--trophic-apex)',
-  decomposer: 'var(--trophic-decomposer)',
-};
-
-// Raw color values for recharts (CSS vars don't work in SVG fills)
-const TROPHIC_RAW = {
-  producer: '#6abf69',
-  primary_consumer: '#5b9bd5',
-  secondary_consumer: '#e8944a',
-  apex_predator: '#e86b8a',
-  decomposer: '#8b6bbf',
-};
-
-export default function PopulationChart({ biomeTimeseries, currentTick, tickIdx, animFrame }) {
-  // Build chart data from animation frames or timeseries
-  const chartData = useMemo(() => {
-    if (!animFrame?.allFrames && !biomeTimeseries) return null;
-
-    // If we have all frames cached (injected from TimelineBar), use those
-    // Otherwise build from biomeTimeseries total population
-    if (biomeTimeseries) {
-      const data = [];
-      const numTicks = biomeTimeseries.ticks.length;
-      for (let t = 0; t < numTicks; t++) {
-        let totalPop = 0;
-        for (let b = 0; b < biomeTimeseries.biome_ids.length; b++) {
-          totalPop += biomeTimeseries.population[b]?.[t] || 0;
-        }
-        data.push({ tick: t + 1, total: totalPop });
-      }
-      return data;
-    }
-    return null;
-  }, [biomeTimeseries, animFrame?.allFrames]);
-
-  if (!chartData || chartData.length === 0) {
+export default function PopulationChart({ popHistory, currentTick }) {
+  if (!popHistory || popHistory.length === 0) {
     return (
       <div className="card" style={{ padding: '12px 14px' }}>
         <div className="panel-title">Population Over Time</div>
         <div style={{ color: 'var(--text-muted)', fontSize: 12, padding: '20px 0', textAlign: 'center' }}>
-          Run simulation to see population trends
+          Run animation to see population trends
         </div>
       </div>
     );
@@ -59,7 +19,7 @@ export default function PopulationChart({ biomeTimeseries, currentTick, tickIdx,
     <div className="card" style={{ padding: '12px 14px' }}>
       <div className="panel-title">Population Over Time</div>
       <ResponsiveContainer width="100%" height={160}>
-        <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
+        <AreaChart data={popHistory} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
           <defs>
             <linearGradient id="popGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#7c6cf0" stopOpacity={0.3} />
@@ -97,15 +57,8 @@ export default function PopulationChart({ biomeTimeseries, currentTick, tickIdx,
             stroke="#7c6cf0"
             strokeWidth={2}
             fill="url(#popGradient)"
+            isAnimationActive={false}
           />
-          {currentTick > 0 && (
-            <ReferenceLine
-              x={currentTick}
-              stroke="#7c6cf0"
-              strokeWidth={2}
-              strokeDasharray="4 2"
-            />
-          )}
         </AreaChart>
       </ResponsiveContainer>
     </div>

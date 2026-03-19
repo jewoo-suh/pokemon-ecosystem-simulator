@@ -101,7 +101,6 @@ function getSeason(tick) {
 }
 
 export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlayStateChange }) {
-  const [tickCount, setTickCount] = useState(100);
   const [loading, setLoading] = useState(false);
   const [frames, setFrames] = useState(null);
   const [catalog, setCatalog] = useState(null);
@@ -162,7 +161,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
     setFrames(null); setFrameIdx(0); setPlaying(false);
     eventsMapRef.current = null;
     try {
-      const data = await runAnimationFrames(tickCount);
+      const data = await runAnimationFrames(200);
       setCatalog(data.species);
       setFrames(data.frames);
       setFrameIdx(0);
@@ -192,7 +191,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
     } finally {
       setLoading(false);
     }
-  }, [tickCount, onTicksRun]);
+  }, [onTicksRun]);
 
   const togglePlay = () => {
     if (!frames) return;
@@ -234,16 +233,6 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
 
         {!frames ? (
           <>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Simulate</span>
-            <input
-              type="range" min={10} max={500} step={10} value={tickCount}
-              onChange={e => setTickCount(Number(e.target.value))}
-              style={{ width: 100, accentColor: 'var(--accent)' }}
-              disabled={loading}
-            />
-            <span style={{ fontSize: 12, color: 'var(--text-primary)', minWidth: 30, fontFamily: 'monospace' }}>
-              {tickCount}
-            </span>
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
@@ -258,7 +247,7 @@ export default function TimelineBar({ currentTick, onTicksRun, onFrame, onPlaySt
                 fontFamily: 'var(--font-display)',
               }}
             >
-              {loading ? 'Computing...' : 'Run & Animate'}
+              {loading ? 'Loading...' : 'Run Animation'}
             </motion.button>
           </>
         ) : (

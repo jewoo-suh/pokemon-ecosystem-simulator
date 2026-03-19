@@ -6,6 +6,7 @@ import EventLog from './dashboard/EventLog';
 export default function DataPanel({
   liveStats,
   biomeTimeseries,
+  popHistory,
   currentTick,
   tickIdx,
   selectedBiomeId,
@@ -17,10 +18,8 @@ export default function DataPanel({
   return (
     <div className="data-panel-inner">
       <PopulationChart
-        biomeTimeseries={biomeTimeseries}
+        popHistory={popHistory}
         currentTick={currentTick}
-        tickIdx={tickIdx}
-        animFrame={animFrame}
       />
 
       <TrophicBars trophic={liveStats?.trophic} />
