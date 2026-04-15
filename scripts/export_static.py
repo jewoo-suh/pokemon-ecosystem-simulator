@@ -605,6 +605,49 @@ def export_events():
     print(f"  events: {len(events)} total events generated")
 
 
+def export_type_biome_affinity():
+    """Export type_biome_affinity table + type names + biome names"""
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT id, name FROM types ORDER BY id")
+    types = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT id, name, carrying_capacity, biomass_factor::float AS biomass_factor FROM biomes ORDER BY id")
+    biomes = [dict(r) for r in cur.fetchall()]
+    cur.execute("""
+        SELECT tba.type_id, tba.biome_id, tba.affinity::float AS affinity
+        FROM type_biome_affinity tba
+    """)
+    entries = [dict(r) for r in cur.fetchall()]
+    write_json("type_biome_affinity.json", {
+        "types": types,
+        "biomes": biomes,
+        "entries": entries,
+    })
+    print(f"  type-biome affinity: {len(entries)} entries across {len(types)} types × {len(biomes)} biomes")
+    cur.close()
+    conn.close()
+
+
+def export_evolution_chains():
+    """Export evolution_chains table as evolution_chains.json"""
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        SELECT ec.from_pokemon_id, p1.name AS from_name,
+               ec.to_pokemon_id,   p2.name AS to_name,
+               ec.min_population, ec.evolution_order
+        FROM evolution_chains ec
+        JOIN pokemon p1 ON p1.id = ec.from_pokemon_id
+        JOIN pokemon p2 ON p2.id = ec.to_pokemon_id
+        ORDER BY ec.from_pokemon_id, ec.evolution_order
+    """)
+    edges = [dict(r) for r in cur.fetchall()]
+    write_json("evolution_chains.json", {"edges": edges, "edge_count": len(edges)})
+    print(f"  evolution chains: {len(edges)} edges")
+    cur.close()
+    conn.close()
+
+
 def write_json(filename, data):
     filepath = os.path.join(OUTPUT_DIR, filename)
     with open(filepath, "w") as f:
@@ -659,6 +702,8 @@ def main():
     export_status()
     export_biomes()
     export_food_chain()
+    export_evolution_chains()
+    export_type_biome_affinity()
     export_stats()
     export_species()
     export_sprites()

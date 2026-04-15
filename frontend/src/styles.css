@@ -708,3 +708,202 @@ h1, h2, h3 {
   color: rgba(255,255,255,0.35);
   letter-spacing: 1px;
 }
+
+/* ---- Evolution chain ---- */
+
+.evo-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+}
+
+.evo-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.evo-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s, border-color 0.15s;
+  min-width: 64px;
+}
+.evo-node:hover {
+  background: rgba(140,170,255,0.1);
+  transform: translateY(-2px);
+}
+.evo-node.active {
+  background: rgba(140,170,255,0.15);
+  border-color: rgba(140,170,255,0.5);
+  box-shadow: 0 0 0 2px rgba(140,170,255,0.2);
+}
+.evo-node-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+
+.evo-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 4px;
+  color: rgba(255,255,255,0.4);
+  font-size: 20px;
+  line-height: 1;
+}
+.evo-min-pop {
+  font-size: 9px;
+  color: rgba(255,255,255,0.35);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ---- Ecology view (type × biome affinity) ---- */
+
+.ecology-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #16162a;
+  color: #fff;
+  padding: 20px 26px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.ecology-loading {
+  padding: 40px;
+  text-align: center;
+  color: rgba(255,255,255,0.5);
+}
+
+.ecology-header {
+  margin-bottom: 18px;
+  max-width: 780px;
+}
+.ecology-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+}
+.ecology-header p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.6);
+  margin: 8px 0 0;
+}
+
+.affinity-scroll {
+  overflow-x: auto;
+  padding-bottom: 12px;
+}
+
+.affinity-table {
+  border-collapse: separate;
+  border-spacing: 2px;
+  margin: 0 auto;
+}
+
+.affinity-corner {
+  width: 110px;
+  background: transparent;
+}
+
+.affinity-col-head {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 70px;
+  max-width: 90px;
+}
+.biome-head-icon {
+  font-size: 18px;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+.biome-head-name {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+  color: rgba(255,255,255,0.75);
+}
+
+.affinity-row-head {
+  padding: 2px 8px;
+  text-align: right;
+  width: 110px;
+  min-width: 110px;
+}
+
+.affinity-cell {
+  padding: 8px 10px;
+  min-width: 52px;
+  text-align: center;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.04);
+  transition: border-color 0.15s, transform 0.1s;
+  cursor: default;
+}
+.affinity-cell.hovered {
+  border-color: rgba(255,255,255,0.6);
+  transform: scale(1.05);
+}
+
+.ecology-legend {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.legend-swatches {
+  display: flex;
+  gap: 2px;
+}
+.legend-swatch {
+  padding: 6px 12px;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.legend-labels {
+  display: flex;
+  gap: 40px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.hover-readout {
+  margin-top: 10px;
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.85);
+  text-transform: capitalize;
+}

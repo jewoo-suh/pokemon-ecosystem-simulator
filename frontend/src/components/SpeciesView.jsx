@@ -1,6 +1,72 @@
 import { useEffect, useMemo, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { getAllSpecies, getFoodChain, getAllAnimationFrames } from '../data';
+import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid, ReferenceArea } from 'recharts';
+import { getAllSpecies, getFoodChain, getAllAnimationFrames, getEvents, getEvolutionChains } from '../data';
+
+const EVENT_ICON = {
+  extinction: '💀', food_chain_collapse: '📉', fire: '🔥', flood: '🌊',
+  drought: '🏜️', disease: '🦠', bloom: '🌸', population_boom: '📈',
+  mass_migration: '🧭', evolution_wave: '✨', disaster: '⚠️',
+  invasive_species: '⚠️', equilibrium_reached: '⚖️', season_change: '🌱',
+};
+
+function WindowTooltip({ active, payload, windows }) {
+  if (!active || !payload || !payload.length) return null;
+  const p = payload[0].payload;
+  const w = p.windowId != null ? windows[p.windowId] : null;
+
+  const grouped = {};
+  if (w) for (const e of w.events) grouped[e.type] = (grouped[e.type] || 0) + 1;
+  const sortedTypes = Object.entries(grouped).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div style={{
+      background: 'rgba(18,18,32,0.97)',
+      border: '1px solid rgba(255,255,255,0.15)',
+      borderRadius: 6,
+      padding: '8px 12px',
+      fontSize: 12,
+      color: '#fff',
+      maxWidth: 340,
+      boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 2 }}>Tick {p.tick}</div>
+      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>
+        Population: <strong style={{ color: '#fff' }}>{p.population.toLocaleString()}</strong>
+      </div>
+      {w && (
+        <div style={{
+          marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.1)',
+        }}>
+          <div style={{
+            fontWeight: 700, fontSize: 11,
+            color: w.delta < 0 ? '#e86b8a' : '#6ad8a0',
+          }}>
+            {w.delta < 0 ? '▼ Decline' : '▲ Surge'} · T{w.startTick}–T{w.endTick}
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.85, marginTop: 2 }}>
+            {w.startPop.toLocaleString()} → {w.endPop.toLocaleString()} ({w.delta > 0 ? '+' : ''}{w.delta.toLocaleString()}, {(w.rel * 100).toFixed(0)}%)
+          </div>
+          {sortedTypes.length > 0 ? (
+            <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {sortedTypes.slice(0, 6).map(([type, count]) => (
+                <span key={type} style={{
+                  background: 'rgba(255,255,255,0.08)', padding: '2px 6px',
+                  borderRadius: 4, fontSize: 10,
+                }}>
+                  {EVENT_ICON[type] || '•'} {count}× {type.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.55, fontStyle: 'italic' }}>
+              No matched ecosystem events in this window — likely predation cascade or food scarcity
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const SPRITE_BASE = import.meta.env.BASE_URL + 'data/sprites/';
 
@@ -183,15 +249,146 @@ function FoodWeb({ speciesId, speciesMap, edges, onSelectSpecies }) {
 }
 
 // ---- Main detail panel ----
-function SpeciesDetail({ speciesId, speciesMap, edges, timeline, onSelectSpecies }) {
-  const sp = speciesMap[speciesId];
-  if (!sp) return null;
+function EvolutionChain({ speciesId, evoEdges, speciesMap, onSelectSpecies }) {
+  const { stages, hasChain } = useMemo(() => {
+    if (!evoEdges || evoEdges.length === 0) return { stages: [], hasChain: false };
+    const forward = {};
+    const backward = {};
+    for (const e of evoEdges) {
+      if (!forward[e.from_pokemon_id]) forward[e.from_pokemon_id] = [];
+      forward[e.from_pokemon_id].push({
+        id: e.to_pokemon_id, name: e.to_name, min_pop: e.min_population,
+      });
+      backward[e.to_pokemon_id] = { id: e.from_pokemon_id, name: e.from_name };
+    }
+    // Walk back to root
+    let root = speciesId;
+    const seen = new Set();
+    while (backward[root] && !seen.has(root)) { seen.add(root); root = backward[root].id; }
+    // Has no evolutions and isn't evolved from anything
+    if (!forward[root] && root === speciesId && !backward[speciesId]) {
+      return { stages: [], hasChain: false };
+    }
+    // Build stages by BFS
+    const stagesArr = [];
+    function visit(id, depth, minPop) {
+      while (stagesArr.length <= depth) stagesArr.push([]);
+      if (!stagesArr[depth].some(n => n.id === id)) {
+        stagesArr[depth].push({ id, min_pop: minPop });
+      }
+      if (forward[id]) for (const child of forward[id]) visit(child.id, depth + 1, child.min_pop);
+    }
+    visit(root, 0, null);
+    return { stages: stagesArr, hasChain: true };
+  }, [speciesId, evoEdges]);
 
-  const chartData = useMemo(() => {
-    if (!timeline || !timeline[speciesId]) return [];
+  if (!hasChain) {
+    return (
+      <div style={{ padding: 12, fontSize: 11, opacity: 0.5, fontStyle: 'italic', textAlign: 'center' }}>
+        No evolution data for this species.
+      </div>
+    );
+  }
+
+  return (
+    <div className="evo-chain">
+      {stages.map((stage, si) => (
+        <div key={si} style={{ display: 'flex', alignItems: 'center' }}>
+          {si > 0 && (
+            <div className="evo-arrow">
+              <span>→</span>
+              {stage[0]?.min_pop != null && (
+                <span className="evo-min-pop">pop ≥ {stage[0].min_pop}</span>
+              )}
+            </div>
+          )}
+          <div className="evo-stage">
+            {stage.map(n => {
+              const sp = speciesMap[n.id];
+              const active = n.id === speciesId;
+              return (
+                <div
+                  key={n.id}
+                  className={`evo-node ${active ? 'active' : ''}`}
+                  onClick={() => onSelectSpecies(n.id)}
+                  title={sp?.name || `#${n.id}`}
+                >
+                  <SpriteImg id={n.id} size={active ? 56 : 44} alt={sp?.name} />
+                  <div className="evo-node-name">{sp?.name || `#${n.id}`}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SpeciesDetail({ speciesId, speciesMap, edges, evoEdges, timeline, biomesBySpecies, allEvents, onSelectSpecies }) {
+  const sp = speciesMap[speciesId];
+
+  const { chartData, windows } = useMemo(() => {
+    if (!sp || !timeline || !timeline[speciesId]) return { chartData: [], windows: [] };
     const t = timeline[speciesId];
-    return t.ticks.map((tk, i) => ({ tick: tk, population: t.pops[i] }));
-  }, [timeline, speciesId]);
+    const pops = t.pops;
+    const ticks = t.ticks;
+    const data = ticks.map((tk, i) => ({ tick: tk, population: pops[i], windowId: null }));
+
+    // --- Rolling-window anomaly detection (captures sustained trends) ---
+    const WINDOW = 80;
+    const STEP = 20;
+    const raw = [];
+    for (let i = 0; i + WINDOW < pops.length; i += STEP) {
+      const start = pops[i];
+      const end = pops[i + WINDOW];
+      const delta = end - start;
+      const rel = start > 10 ? Math.abs(delta) / start : 0;
+      if (Math.abs(delta) >= 50 && rel >= 0.3) {
+        raw.push({
+          startIdx: i, endIdx: i + WINDOW,
+          startTick: ticks[i], endTick: ticks[i + WINDOW],
+          delta, startPop: start, endPop: end, rel,
+          score: Math.abs(delta) * Math.min(rel, 1),
+        });
+      }
+    }
+    // Greedy non-overlap selection, max 5 windows
+    raw.sort((a, b) => b.score - a.score);
+    const picked = [];
+    for (const w of raw) {
+      const overlap = picked.some(p => w.startIdx < p.endIdx && w.endIdx > p.startIdx);
+      if (!overlap) picked.push(w);
+      if (picked.length >= 5) break;
+    }
+    picked.sort((a, b) => a.startIdx - b.startIdx);
+
+    // --- Match events within each window ---
+    const speciesBiomes = biomesBySpecies?.[speciesId] || new Set();
+    const biomeTypes = new Set(['fire', 'flood', 'drought', 'disease', 'bloom', 'disaster']);
+    const globalTypes = new Set(['food_chain_collapse', 'mass_migration', 'evolution_wave', 'invasive_species']);
+
+    for (let wi = 0; wi < picked.length; wi++) {
+      const w = picked[wi];
+      w.id = wi;
+      w.events = (allEvents || []).filter(ev => {
+        if (ev.tick == null || ev.tick < w.startTick || ev.tick > w.endTick) return false;
+        if (ev.species_name && sp.name && ev.species_name.toLowerCase() === sp.name.toLowerCase()) return true;
+        if (ev.pokemon_id === sp.id) return true;
+        if (ev.biome_id && speciesBiomes.has(ev.biome_id) && biomeTypes.has(ev.type)) return true;
+        if (globalTypes.has(ev.type) && !ev.biome_id && !ev.species_name) return true;
+        return false;
+      });
+      // Tag chart points inside this window
+      for (let i = w.startIdx; i <= w.endIdx && i < data.length; i++) {
+        if (data[i].windowId == null) data[i].windowId = wi;
+      }
+    }
+
+    return { chartData: data, windows: picked };
+  }, [sp, timeline, speciesId, biomesBySpecies, allEvents]);
+
+  if (!sp) return null;
 
   const latestPop = chartData.length > 0 ? chartData[chartData.length - 1].population : 0;
   const peakPop = chartData.reduce((m, p) => Math.max(m, p.population), 0);
@@ -243,25 +440,46 @@ function SpeciesDetail({ speciesId, speciesMap, edges, timeline, onSelectSpecies
         </div>
       </div>
 
+      {/* Evolution chain */}
+      <div className="species-chart">
+        <div className="species-section-title">Evolution</div>
+        <EvolutionChain
+          speciesId={speciesId}
+          evoEdges={evoEdges}
+          speciesMap={speciesMap}
+          onSelectSpecies={onSelectSpecies}
+        />
+      </div>
+
       {/* Population timeline */}
       <div className="species-chart">
         <div className="species-section-title">Population over time</div>
         {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={chartData} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+              {windows.map(w => (
+                <ReferenceArea
+                  key={w.id}
+                  x1={w.startTick}
+                  x2={w.endTick}
+                  fill={w.delta < 0 ? '#e86b8a' : '#6ad8a0'}
+                  fillOpacity={0.12}
+                  strokeOpacity={0}
+                  ifOverflow="extendDomain"
+                />
+              ))}
               <XAxis dataKey="tick" tick={{ fontSize: 10, fill: '#aaa' }} />
               <YAxis tick={{ fontSize: 10, fill: '#aaa' }} domain={[0, 'auto']} />
-              <RTooltip
-                contentStyle={{ background: 'rgba(26,26,46,0.95)', border: '1px solid rgba(255,255,255,0.15)', fontSize: 12 }}
-                labelStyle={{ color: '#fff' }}
-              />
+              <RTooltip content={<WindowTooltip windows={windows} />} />
               <Line
                 type="monotone"
                 dataKey="population"
                 stroke={TROPHIC_COLOR[sp.trophic_level] || '#6abf69'}
                 strokeWidth={2}
                 dot={false}
+                activeDot={{ r: 4, fill: '#fff' }}
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -291,12 +509,17 @@ export default function SpeciesView() {
   const [speciesMap, setSpeciesMap] = useState(null);
   const [edges, setEdges] = useState(null);
   const [timeline, setTimeline] = useState(null); // { [id]: { ticks: [], pops: [], peak, latest } }
+  const [biomesBySpecies, setBiomesBySpecies] = useState(null);
+  const [allEvents, setAllEvents] = useState(null);
+  const [evoEdges, setEvoEdges] = useState(null);
   const [loadingTimeline, setLoadingTimeline] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
 
   useEffect(() => {
     getAllSpecies().then(setSpeciesMap);
     getFoodChain().then(fc => setEdges(fc?.edges || []));
+    getEvents().then(evs => setAllEvents(evs || []));
+    getEvolutionChains().then(ec => setEvoEdges(ec?.edges || []));
   }, []);
 
   useEffect(() => {
@@ -311,9 +534,14 @@ export default function SpeciesView() {
       const ticks = new Array(numFrames);
       const perSpecies = {}; // id -> Int32Array(numFrames)
 
-      // Pre-init per unique species id
+      // Pre-init per unique species id + collect biomes per species
       const uniqueIds = new Set();
-      for (const sm of speciesMeta) uniqueIds.add(sm.id);
+      const biomesMap = {};
+      for (const sm of speciesMeta) {
+        uniqueIds.add(sm.id);
+        if (!biomesMap[sm.id]) biomesMap[sm.id] = new Set();
+        biomesMap[sm.id].add(sm.biome_id);
+      }
       for (const id of uniqueIds) perSpecies[id] = new Int32Array(numFrames);
 
       for (let fi = 0; fi < numFrames; fi++) {
@@ -340,6 +568,7 @@ export default function SpeciesView() {
       }
       if (!cancelled) {
         setTimeline(out);
+        setBiomesBySpecies(biomesMap);
         setLoadingTimeline(false);
       }
     });
@@ -382,7 +611,10 @@ export default function SpeciesView() {
             speciesId={selectedId}
             speciesMap={speciesMap}
             edges={edges}
+            evoEdges={evoEdges}
             timeline={timeline}
+            biomesBySpecies={biomesBySpecies}
+            allEvents={allEvents}
             onSelectSpecies={setSelectedId}
           />
         )}

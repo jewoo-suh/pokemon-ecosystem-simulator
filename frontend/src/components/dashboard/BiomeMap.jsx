@@ -1,9 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 
-const SCALE = 14;
-const MAX_DOTS_PER_ENTRY = 8;
-const SPRITE_SIZE = 18;
-const SPRITE_BASE = import.meta.env.BASE_URL + 'data/sprites/';
+const SCALE = 10;
+const MAX_DOTS_PER_ENTRY = 15;
 
 const zoomBtnStyle = {
   width: 26, height: 26, padding: 0,
@@ -82,13 +80,10 @@ export default function BiomeMap({
   const canvasRef = useRef(null);
   const wrapperRef = useRef(null);
   const terrainCacheRef = useRef(null);
-  const spriteCacheRef = useRef({}); // { [pokemonId]: { img, loaded, failed } }
-  const [spriteTick, setSpriteTick] = useState(0); // bump to re-render when sprites load
   const [tooltip, setTooltip] = useState(null);
   const [flashBiomes, setFlashBiomes] = useState(new Set());
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   const dragRef = useRef({ active: false, startX: 0, startY: 0, panX: 0, panY: 0, moved: false });
-  const [animT, setAnimT] = useState(0); // ms timestamp for sprite bob
 
   // Build biome cell lookup from mapData
   const biomeCells = useMemo(() => {
@@ -156,48 +151,12 @@ export default function BiomeMap({
           x: slot.positions[i].x,
           y: slot.positions[i].y,
           rgb,
-          pokemonId: sp.id,
           tracked: isTracked,
         });
       }
     }
     return result;
   }, [animFrame?.species, dotSlots, selectedSpeciesId]);
-
-  // rAF-driven time ticker for sprite bob (only when sim is active)
-  useEffect(() => {
-    if (!animFrame) return;
-    let rafId;
-    let lastSet = 0;
-    const step = (now) => {
-      if (now - lastSet > 50) { // ~20fps is plenty for bob
-        setAnimT(now);
-        lastSet = now;
-      }
-      rafId = requestAnimationFrame(step);
-    };
-    rafId = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(rafId);
-  }, [animFrame]);
-
-  // Preload sprite images for currently-visible pokemon
-  useEffect(() => {
-    if (!dots || dots.length === 0) return;
-    const cache = spriteCacheRef.current;
-    const unique = new Set(dots.map(d => d.pokemonId));
-    let pending = 0;
-    for (const id of unique) {
-      if (cache[id]) continue;
-      const entry = { img: new Image(), loaded: false, failed: false };
-      cache[id] = entry;
-      pending++;
-      entry.img.onload = () => { entry.loaded = true; setSpriteTick(t => t + 1); };
-      entry.img.onerror = () => { entry.failed = true; setSpriteTick(t => t + 1); };
-      entry.img.src = `${SPRITE_BASE}${id}.png`;
-    }
-    // avoid unused var warning
-    void pending;
-  }, [dots]);
 
   // Biome ID to timeseries index lookup
   const biomeIdxMap = useMemo(() => {
@@ -310,37 +269,20 @@ export default function BiomeMap({
       ctx.putImageData(terrainCacheRef.current, 0, 0);
     }
 
-    // Draw population sprites (fallback to colored dot if sprite not loaded)
+    // Draw population dots (colored by trophic level)
     if (dots.length > 0) {
-      const cache = spriteCacheRef.current;
-      ctx.imageSmoothingEnabled = false;
-      const tSec = animT / 1000;
-      for (let i = 0; i < dots.length; i++) {
-        const dot = dots[i];
-        const entry = cache[dot.pokemonId];
-        const size = dot.tracked ? SPRITE_SIZE + 4 : SPRITE_SIZE;
-        // Bob: seeded phase per sprite (pokemonId + index) so they bob out-of-sync
-        const phase = (dot.pokemonId * 0.73) + i * 0.41;
-        const bobY = Math.sin(tSec * 2.2 + phase) * 2;
-        const driftX = Math.sin(tSec * 0.9 + phase * 1.7) * 1.2;
-        const x = dot.x - size / 2 + driftX;
-        const y = dot.y - size / 2 + bobY;
-        if (entry && entry.loaded) {
-          if (dot.tracked) {
-            ctx.save();
-            ctx.shadowColor = 'rgba(255,255,255,0.9)';
-            ctx.shadowBlur = 4;
-            ctx.drawImage(entry.img, x, y, size, size);
-            ctx.restore();
-          } else {
-            ctx.drawImage(entry.img, x, y, size, size);
-          }
-        } else {
-          // Fallback: small trophic-colored circle
-          ctx.fillStyle = `rgba(${dot.rgb[0]},${dot.rgb[1]},${dot.rgb[2]},0.85)`;
+      for (const dot of dots) {
+        const radius = dot.tracked ? 3 : 1.8;
+        ctx.fillStyle = `rgba(${dot.rgb[0]},${dot.rgb[1]},${dot.rgb[2]},${dot.tracked ? 1.0 : 0.85})`;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        if (dot.tracked) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+          ctx.lineWidth = 0.8;
           ctx.beginPath();
-          ctx.arc(dot.x, dot.y, 3, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.arc(dot.x, dot.y, radius + 1.5, 0, Math.PI * 2);
+          ctx.stroke();
         }
       }
     }
@@ -380,7 +322,7 @@ export default function BiomeMap({
         }
       }
     }
-  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells, dots, selectedSpeciesId, spriteTick, animT]);
+  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells, dots, selectedSpeciesId]);
 
   // Mouse handling
   const handleMouseMove = useCallback((e) => {

@@ -186,6 +186,22 @@ export async function getAllSpecies() {
   return allSpeciesCache;
 }
 
+let typeBiomeAffinityCache = null;
+export async function getTypeBiomeAffinity() {
+  if (typeBiomeAffinityCache) return typeBiomeAffinityCache;
+  const res = await fetch(`${STATIC}/type_biome_affinity.json`);
+  typeBiomeAffinityCache = await res.json();
+  return typeBiomeAffinityCache;
+}
+
+let evolutionChainsCache = null;
+export async function getEvolutionChains() {
+  if (evolutionChainsCache) return evolutionChainsCache;
+  const res = await fetch(`${STATIC}/evolution_chains.json`);
+  evolutionChainsCache = await res.json();
+  return evolutionChainsCache;
+}
+
 let animationFramesCache = null;
 export async function getAllAnimationFrames() {
   if (animationFramesCache) return animationFramesCache;
