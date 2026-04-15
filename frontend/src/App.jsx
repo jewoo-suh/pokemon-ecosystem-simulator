@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import LandingPage from './components/LandingPage';
-import DashboardView from './components/DashboardView';
+import WorldView from './components/WorldView';
 import './styles.css';
 
 function App() {
@@ -21,7 +21,7 @@ function App() {
           transition={{ duration: 0.6 }}
           style={{ height: '100vh', width: '100vw' }}
         >
-          <DashboardView />
+          <WorldView />
         </motion.div>
       )}
     </AnimatePresence>

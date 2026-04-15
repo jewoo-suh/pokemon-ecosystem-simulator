@@ -175,3 +175,21 @@ export async function getBiomeTimeseries() {
 export function isStaticMode() {
   return useStatic === true;
 }
+
+// ---- Additional loaders for Species tab (always static; cached) ----
+
+let allSpeciesCache = null;
+export async function getAllSpecies() {
+  if (allSpeciesCache) return allSpeciesCache;
+  const res = await fetch(`${STATIC}/species.json`);
+  allSpeciesCache = await res.json();
+  return allSpeciesCache;
+}
+
+let animationFramesCache = null;
+export async function getAllAnimationFrames() {
+  if (animationFramesCache) return animationFramesCache;
+  const res = await fetch(`${STATIC}/animation_frames.json`);
+  animationFramesCache = await res.json();
+  return animationFramesCache;
+}

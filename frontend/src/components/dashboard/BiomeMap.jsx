@@ -1,7 +1,16 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 
-const SCALE = 3;
-const MAX_DOTS_PER_ENTRY = 20;
+const SCALE = 14;
+const MAX_DOTS_PER_ENTRY = 8;
+const SPRITE_SIZE = 18;
+const SPRITE_BASE = import.meta.env.BASE_URL + 'data/sprites/';
+
+const zoomBtnStyle = {
+  width: 26, height: 26, padding: 0,
+  background: 'rgba(255,255,255,0.08)', color: '#fff',
+  border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4,
+  cursor: 'pointer', fontSize: 16, fontWeight: 700, lineHeight: 1,
+};
 
 const COLOR_MODES = [
   { key: 'biome', label: 'Biome' },
@@ -71,9 +80,15 @@ export default function BiomeMap({
   selectedSpeciesId,
 }) {
   const canvasRef = useRef(null);
+  const wrapperRef = useRef(null);
   const terrainCacheRef = useRef(null);
+  const spriteCacheRef = useRef({}); // { [pokemonId]: { img, loaded, failed } }
+  const [spriteTick, setSpriteTick] = useState(0); // bump to re-render when sprites load
   const [tooltip, setTooltip] = useState(null);
   const [flashBiomes, setFlashBiomes] = useState(new Set());
+  const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
+  const dragRef = useRef({ active: false, startX: 0, startY: 0, panX: 0, panY: 0, moved: false });
+  const [animT, setAnimT] = useState(0); // ms timestamp for sprite bob
 
   // Build biome cell lookup from mapData
   const biomeCells = useMemo(() => {
@@ -131,22 +146,58 @@ export default function BiomeMap({
       const slot = dotSlots[key];
       if (!slot) continue;
 
-      // If tracking a species, only show that species
-      if (tracking && sp.id !== selectedSpeciesId) continue;
+      const isTracked = tracking && sp.id === selectedSpeciesId;
+      if (tracking && !isTracked) continue;
 
-      const numDots = Math.max(1, Math.min(MAX_DOTS_PER_ENTRY, Math.ceil(sp.population / 50)));
-      // When tracking, use high-contrast black dots; otherwise trophic colors
-      const rgb = tracking ? [20, 20, 20] : (TROPHIC_COLORS_RGB[sp.trophic] || TROPHIC_COLORS_RGB.producer);
+      const numDots = Math.max(1, Math.min(MAX_DOTS_PER_ENTRY, Math.ceil(sp.population / 80)));
+      const rgb = TROPHIC_COLORS_RGB[sp.trophic] || TROPHIC_COLORS_RGB.producer;
       for (let i = 0; i < numDots; i++) {
         result.push({
           x: slot.positions[i].x,
           y: slot.positions[i].y,
           rgb,
+          pokemonId: sp.id,
+          tracked: isTracked,
         });
       }
     }
     return result;
   }, [animFrame?.species, dotSlots, selectedSpeciesId]);
+
+  // rAF-driven time ticker for sprite bob (only when sim is active)
+  useEffect(() => {
+    if (!animFrame) return;
+    let rafId;
+    let lastSet = 0;
+    const step = (now) => {
+      if (now - lastSet > 50) { // ~20fps is plenty for bob
+        setAnimT(now);
+        lastSet = now;
+      }
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+  }, [animFrame]);
+
+  // Preload sprite images for currently-visible pokemon
+  useEffect(() => {
+    if (!dots || dots.length === 0) return;
+    const cache = spriteCacheRef.current;
+    const unique = new Set(dots.map(d => d.pokemonId));
+    let pending = 0;
+    for (const id of unique) {
+      if (cache[id]) continue;
+      const entry = { img: new Image(), loaded: false, failed: false };
+      cache[id] = entry;
+      pending++;
+      entry.img.onload = () => { entry.loaded = true; setSpriteTick(t => t + 1); };
+      entry.img.onerror = () => { entry.failed = true; setSpriteTick(t => t + 1); };
+      entry.img.src = `${SPRITE_BASE}${id}.png`;
+    }
+    // avoid unused var warning
+    void pending;
+  }, [dots]);
 
   // Biome ID to timeseries index lookup
   const biomeIdxMap = useMemo(() => {
@@ -259,24 +310,37 @@ export default function BiomeMap({
       ctx.putImageData(terrainCacheRef.current, 0, 0);
     }
 
-    // Draw population dots
+    // Draw population sprites (fallback to colored dot if sprite not loaded)
     if (dots.length > 0) {
-      const tracking = selectedSpeciesId != null;
-      const dotRadius = tracking ? 2.2 : 1.3;
-      for (const dot of dots) {
-        ctx.fillStyle = `rgba(${dot.rgb[0]},${dot.rgb[1]},${dot.rgb[2]},${tracking ? 1.0 : 0.85})`;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, dotRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // Add white outline ring for tracked dots
-      if (tracking) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-        ctx.lineWidth = 0.5;
-        for (const dot of dots) {
+      const cache = spriteCacheRef.current;
+      ctx.imageSmoothingEnabled = false;
+      const tSec = animT / 1000;
+      for (let i = 0; i < dots.length; i++) {
+        const dot = dots[i];
+        const entry = cache[dot.pokemonId];
+        const size = dot.tracked ? SPRITE_SIZE + 4 : SPRITE_SIZE;
+        // Bob: seeded phase per sprite (pokemonId + index) so they bob out-of-sync
+        const phase = (dot.pokemonId * 0.73) + i * 0.41;
+        const bobY = Math.sin(tSec * 2.2 + phase) * 2;
+        const driftX = Math.sin(tSec * 0.9 + phase * 1.7) * 1.2;
+        const x = dot.x - size / 2 + driftX;
+        const y = dot.y - size / 2 + bobY;
+        if (entry && entry.loaded) {
+          if (dot.tracked) {
+            ctx.save();
+            ctx.shadowColor = 'rgba(255,255,255,0.9)';
+            ctx.shadowBlur = 4;
+            ctx.drawImage(entry.img, x, y, size, size);
+            ctx.restore();
+          } else {
+            ctx.drawImage(entry.img, x, y, size, size);
+          }
+        } else {
+          // Fallback: small trophic-colored circle
+          ctx.fillStyle = `rgba(${dot.rgb[0]},${dot.rgb[1]},${dot.rgb[2]},0.85)`;
           ctx.beginPath();
           ctx.arc(dot.x, dot.y, 3, 0, Math.PI * 2);
-          ctx.stroke();
+          ctx.fill();
         }
       }
     }
@@ -316,10 +380,23 @@ export default function BiomeMap({
         }
       }
     }
-  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells, dots, selectedSpeciesId]);
+  }, [mapData, colorMode, currentValues, maxPop, maxDiversity, selectedBiomeId, hoveredBiomeId, flashBiomes, biomeCells, dots, selectedSpeciesId, spriteTick, animT]);
 
   // Mouse handling
   const handleMouseMove = useCallback((e) => {
+    // Drag-to-pan takes priority
+    if (dragRef.current.active) {
+      const dx = e.clientX - dragRef.current.startX;
+      const dy = e.clientY - dragRef.current.startY;
+      if (!dragRef.current.moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        dragRef.current.moved = true;
+      }
+      if (dragRef.current.moved) {
+        setView(v => ({ ...v, panX: dragRef.current.panX + dx, panY: dragRef.current.panY + dy }));
+      }
+      return;
+    }
+
     const canvas = canvasRef.current;
     if (!canvas || !mapData) return;
     const rect = canvas.getBoundingClientRect();
@@ -352,7 +429,21 @@ export default function BiomeMap({
     });
   }, [mapData, biomeTimeseries, biomeIdxMap, currentValues, currentBiomeData, onHoverBiome]);
 
+  const handleMouseDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    dragRef.current = {
+      active: true, moved: false,
+      startX: e.clientX, startY: e.clientY,
+      panX: view.panX, panY: view.panY,
+    };
+  }, [view.panX, view.panY]);
+
+  const handleMouseUp = useCallback(() => {
+    dragRef.current.active = false;
+  }, []);
+
   const handleClick = useCallback(() => {
+    if (dragRef.current.moved) { dragRef.current.moved = false; return; }
     if (hoveredBiomeId != null) {
       onSelectBiome(hoveredBiomeId === selectedBiomeId ? null : hoveredBiomeId);
     }
@@ -362,6 +453,48 @@ export default function BiomeMap({
     onHoverBiome(null);
     setTooltip(null);
   }, [onHoverBiome]);
+
+  // Wheel to zoom, anchored at cursor
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const rect = wrapper.getBoundingClientRect();
+      const cx = e.clientX - (rect.left + rect.width / 2);
+      const cy = e.clientY - (rect.top + rect.height / 2);
+      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+      setView(v => {
+        const newZoom = Math.max(1, Math.min(6, v.zoom * factor));
+        if (newZoom === v.zoom) return v;
+        const ratio = newZoom / v.zoom;
+        return {
+          zoom: newZoom,
+          panX: cx * (1 - ratio) + v.panX * ratio,
+          panY: cy * (1 - ratio) + v.panY * ratio,
+        };
+      });
+    };
+    wrapper.addEventListener('wheel', onWheel, { passive: false });
+    return () => wrapper.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Release drag if mouse is released outside canvas
+  useEffect(() => {
+    const onUp = () => { dragRef.current.active = false; };
+    window.addEventListener('mouseup', onUp);
+    return () => window.removeEventListener('mouseup', onUp);
+  }, []);
+
+  const zoomByButton = useCallback((factor) => {
+    setView(v => {
+      const newZoom = Math.max(1, Math.min(6, v.zoom * factor));
+      if (newZoom === v.zoom) return v;
+      const ratio = newZoom / v.zoom;
+      return { zoom: newZoom, panX: v.panX * ratio, panY: v.panY * ratio };
+    });
+  }, []);
+  const resetView = useCallback(() => setView({ zoom: 1, panX: 0, panY: 0 }), []);
 
   if (!mapData) {
     return (
@@ -387,20 +520,40 @@ export default function BiomeMap({
       </div>
 
       {/* Canvas */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
+      <div
+        ref={wrapperRef}
+        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}
+      >
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
           onClick={handleClick}
           onMouseLeave={handleMouseLeave}
           style={{
-            cursor: hoveredBiomeId != null ? 'pointer' : 'default',
+            cursor: dragRef.current.active ? 'grabbing' : (view.zoom > 1 ? 'grab' : (hoveredBiomeId != null ? 'pointer' : 'default')),
             maxWidth: '100%',
             maxHeight: '100%',
             imageRendering: 'pixelated',
             borderRadius: 'var(--radius-sm)',
+            transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
+            transformOrigin: 'center center',
+            transition: dragRef.current.active ? 'none' : 'transform 0.08s ease-out',
           }}
         />
+
+        {/* Zoom controls */}
+        <div style={{
+          position: 'absolute', bottom: 10, right: 10, zIndex: 5,
+          display: 'flex', flexDirection: 'column', gap: 4,
+          background: 'rgba(26,26,46,0.85)', padding: 4, borderRadius: 6,
+          border: '1px solid rgba(255,255,255,0.1)',
+        }}>
+          <button onClick={() => zoomByButton(1.3)} title="Zoom in" style={zoomBtnStyle}>+</button>
+          <button onClick={() => zoomByButton(1 / 1.3)} title="Zoom out" style={zoomBtnStyle}>−</button>
+          <button onClick={resetView} title="Reset view" style={{ ...zoomBtnStyle, fontSize: 10 }}>⟲</button>
+        </div>
 
         {/* Tooltip */}
         {tooltip && (

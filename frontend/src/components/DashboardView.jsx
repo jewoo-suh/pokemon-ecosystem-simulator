@@ -4,6 +4,7 @@ import BiomeMap from './dashboard/BiomeMap';
 import DataPanel from './DataPanel';
 import TimelineBar from './TimelineBar';
 import EventToast from './EventToast';
+import StoryTicker from './StoryTicker';
 import { getMap, getBiomeTimeseries, getAllBiomeDetails } from '../data';
 
 function getSeason(tick) {
@@ -222,6 +223,9 @@ export default function DashboardView() {
 
       {/* Event toasts */}
       <EventToast toasts={toasts} />
+
+      {/* Story ticker (between main and timeline) */}
+      <StoryTicker events={animFrame?.events} currentTick={currentTick} />
 
       {/* Bottom: Timeline */}
       <div className="dashboard-timeline">
