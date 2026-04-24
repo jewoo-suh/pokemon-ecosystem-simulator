@@ -505,7 +505,7 @@ function SpeciesDetail({ speciesId, speciesMap, edges, evoEdges, timeline, biome
 }
 
 // ---- Main view ----
-export default function SpeciesView() {
+export default function SpeciesView({ routedSpeciesId, onChangeSpeciesId }) {
   const [speciesMap, setSpeciesMap] = useState(null);
   const [edges, setEdges] = useState(null);
   const [timeline, setTimeline] = useState(null); // { [id]: { ticks: [], pops: [], peak, latest } }
@@ -513,7 +513,19 @@ export default function SpeciesView() {
   const [allEvents, setAllEvents] = useState(null);
   const [evoEdges, setEvoEdges] = useState(null);
   const [loadingTimeline, setLoadingTimeline] = useState(true);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(routedSpeciesId ?? null);
+
+  // Sync down from URL hash (back/forward, external edits, cross-tab links)
+  useEffect(() => {
+    if (routedSpeciesId != null && routedSpeciesId !== selectedId) {
+      setSelectedId(routedSpeciesId);
+    }
+  }, [routedSpeciesId]);
+
+  const selectSpecies = (id) => {
+    setSelectedId(id);
+    if (onChangeSpeciesId) onChangeSpeciesId(id);
+  };
 
   useEffect(() => {
     getAllSpecies().then(setSpeciesMap);
@@ -597,7 +609,7 @@ export default function SpeciesView() {
       <SpeciesList
         species={speciesMap}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={selectSpecies}
         populations={timeline}
       />
       <div className="species-detail-scroll">
@@ -615,7 +627,7 @@ export default function SpeciesView() {
             timeline={timeline}
             biomesBySpecies={biomesBySpecies}
             allEvents={allEvents}
-            onSelectSpecies={setSelectedId}
+            onSelectSpecies={selectSpecies}
           />
         )}
       </div>

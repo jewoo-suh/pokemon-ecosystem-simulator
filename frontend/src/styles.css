@@ -157,7 +157,7 @@ h1, h2, h3 {
   height: 100%;
   width: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto auto;
   background: var(--bg-primary);
   overflow: hidden;
 }
@@ -906,4 +906,382 @@ h1, h2, h3 {
   font-size: 12px;
   color: rgba(255,255,255,0.85);
   text-transform: capitalize;
+}
+
+/* ---- Global Stats Strip (Dashboard) ---- */
+
+.stats-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 4px 16px 0;
+  padding: 6px 0;
+  background: rgba(10, 10, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.strip-cell {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 14px;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  min-width: 0;
+}
+.strip-cell:last-child { border-right: none; flex: 1; }
+
+.strip-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+}
+.strip-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.92);
+  letter-spacing: 0.2px;
+  text-transform: capitalize;
+}
+
+/* ---- Data view ---- */
+
+.data-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #0f0f1a;
+  color: rgba(255,255,255,0.9);
+  min-height: 0;
+}
+
+.data-subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px 0;
+  flex-shrink: 0;
+}
+.data-subtabs button {
+  padding: 6px 14px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.55);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+}
+.data-subtabs button.active {
+  background: #16162a;
+  color: #fff;
+  border-color: rgba(255,255,255,0.15);
+}
+
+.data-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #16162a;
+  border: 1px solid rgba(255,255,255,0.08);
+  margin: 0 16px 16px;
+}
+
+.data-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.15);
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+}
+.data-search {
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  min-width: 180px;
+}
+.data-search:focus { border-color: rgba(140,170,255,0.5); }
+
+.data-type-filter {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.data-type-filter button {
+  padding: 3px 6px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.6);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-family: inherit;
+}
+.data-type-filter button:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.data-type-filter button.active { box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
+
+.data-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.data-table-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.9);
+}
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  background: #0c0c18;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+  white-space: nowrap;
+  z-index: 2;
+}
+.data-table thead th:hover { background: #14142a; color: #fff; }
+.data-table tbody td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  white-space: nowrap;
+}
+.data-row { cursor: pointer; }
+.data-row:hover td { background: rgba(140,170,255,0.08); }
+
+.data-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.type-pill-mini {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.4);
+}
+
+/* Type effectiveness matrix */
+.matchup-grid {
+  table-layout: fixed;
+}
+.matchup-grid th, .matchup-grid td {
+  min-width: 32px;
+  max-width: 40px;
+}
+.matchup-cell {
+  border: 1px solid rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.88);
+}
+
+/* ---- Rules view ---- */
+
+.rules-view {
+  flex: 1;
+  background: #0f0f1a;
+  color: rgba(255,255,255,0.92);
+  padding: 22px 28px 60px;
+  overflow-y: auto;
+  min-height: 0;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rules-header {
+  max-width: 880px;
+  margin: 0 0 20px;
+}
+.rules-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+.rules-header p {
+  margin: 8px 0 0;
+  color: rgba(255,255,255,0.65);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.rules-header code {
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.rules-section {
+  border: 1px solid rgba(255,255,255,0.08);
+  background: #16162a;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  max-width: 1100px;
+}
+
+.rules-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+.rules-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #fff;
+}
+.rules-subtitle {
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+}
+
+.rules-section-body { font-size: 12px; }
+
+.rules-list {
+  margin: 0;
+  padding-left: 20px;
+}
+.rules-list li {
+  margin: 3px 0;
+  color: rgba(255,255,255,0.85);
+}
+
+.rules-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.rules-cols h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.5px;
+}
+
+.rules-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 2fr;
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 11px;
+}
+.rules-label {
+  color: rgba(255,255,255,0.55);
+  text-transform: capitalize;
+}
+.rules-value {
+  color: rgba(255,255,255,0.92);
+}
+
+.rules-k {
+  background: rgba(140,170,255,0.12);
+  color: #b6c8ff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 11px;
+}
+.rules-v {
+  color: #f0c060;
+  font-weight: 600;
+}
+
+.trophic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.trophic-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-left: 3px solid #888;
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+.trophic-card h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: #fff;
+}
+.trophic-card p {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(255,255,255,0.7);
+  line-height: 1.45;
+}
+
+.rules-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+}
+.rules-table th {
+  text-align: left;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: rgba(255,255,255,0.55);
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+.rules-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.85);
+}
+.rules-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #b6c8ff;
 }

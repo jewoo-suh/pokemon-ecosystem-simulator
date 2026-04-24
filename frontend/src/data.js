@@ -186,6 +186,14 @@ export async function getAllSpecies() {
   return allSpeciesCache;
 }
 
+let typeEffectivenessCache = null;
+export async function getTypeEffectiveness() {
+  if (typeEffectivenessCache) return typeEffectivenessCache;
+  const res = await fetch(`${STATIC}/type_effectiveness.json`);
+  typeEffectivenessCache = await res.json();
+  return typeEffectivenessCache;
+}
+
 let typeBiomeAffinityCache = null;
 export async function getTypeBiomeAffinity() {
   if (typeBiomeAffinityCache) return typeBiomeAffinityCache;
@@ -208,4 +216,49 @@ export async function getAllAnimationFrames() {
   const res = await fetch(`${STATIC}/animation_frames.json`);
   animationFramesCache = await res.json();
   return animationFramesCache;
+}
+
+// Aggregate per-species population timelines across all biomes.
+// Heavy: ~14M ops on first call, then cached.
+let speciesTimelineCache = null;
+export async function getSpeciesTimeline() {
+  if (speciesTimelineCache) return speciesTimelineCache;
+  const data = await getAllAnimationFrames();
+  if (!data) return { timeline: {}, biomesBySpecies: {}, ticks: [] };
+
+  const speciesMeta = data.species;
+  const frames = data.frames;
+  const numFrames = frames.length;
+  const ticks = new Array(numFrames);
+  const perSpecies = {};
+  const biomesMap = {};
+
+  const uniqueIds = new Set();
+  for (const sm of speciesMeta) {
+    uniqueIds.add(sm.id);
+    if (!biomesMap[sm.id]) biomesMap[sm.id] = new Set();
+    biomesMap[sm.id].add(sm.biome_id);
+  }
+  for (const id of uniqueIds) perSpecies[id] = new Int32Array(numFrames);
+
+  for (let fi = 0; fi < numFrames; fi++) {
+    const f = frames[fi];
+    ticks[fi] = f.tick;
+    const pops = f.populations;
+    for (let ei = 0; ei < pops.length; ei++) {
+      const sid = speciesMeta[ei].id;
+      perSpecies[sid][fi] += pops[ei];
+    }
+  }
+
+  const out = {};
+  for (const id of uniqueIds) {
+    const arr = perSpecies[id];
+    let peak = 0;
+    for (let i = 0; i < arr.length; i++) if (arr[i] > peak) peak = arr[i];
+    out[id] = { ticks, pops: Array.from(arr), peak, latest: arr[arr.length - 1] };
+  }
+
+  speciesTimelineCache = { timeline: out, biomesBySpecies: biomesMap, ticks };
+  return speciesTimelineCache;
 }

@@ -5,6 +5,7 @@ import DataPanel from './DataPanel';
 import TimelineBar from './TimelineBar';
 import EventToast from './EventToast';
 import StoryTicker from './StoryTicker';
+import StatsStrip from './StatsStrip';
 import { getMap, getBiomeTimeseries, getAllBiomeDetails } from '../data';
 
 function getSeason(tick) {
@@ -178,6 +179,9 @@ export default function DashboardView() {
         livingSpecies={liveStats?.living_species ?? null}
         currentTick={currentTick}
       />
+
+      {/* Global stats strip */}
+      <StatsStrip currentTick={currentTick} animFrame={animFrame} popHistory={popHistory} />
 
       {/* Main content area */}
       <div className="dashboard-main">

@@ -270,6 +270,8 @@ def export_species():
                    p.sp_attack, p.sp_defense, p.speed,
                    (p.hp + p.attack + p.defense + p.sp_attack + p.sp_defense + p.speed) AS bst,
                    p.is_legendary, p.is_mythical,
+                   p.height, p.weight, p.catch_rate, p.growth_rate,
+                   p.base_experience, p.hatch_counter,
                    tl.level AS trophic_level
             FROM pokemon p
             JOIN trophic_levels tl ON tl.pokemon_id = p.id
@@ -327,6 +329,12 @@ def export_species():
             "speed": row["speed"],
             "is_legendary": row["is_legendary"],
             "is_mythical": row["is_mythical"],
+            "height": row["height"],          # decimeters
+            "weight": row["weight"],          # hectograms
+            "catch_rate": row["catch_rate"],
+            "growth_rate": row["growth_rate"],
+            "base_experience": row["base_experience"],
+            "hatch_counter": row["hatch_counter"],
             "total_population": total_pop,
             "predator_count": predator_count,
             "prey_count": prey_count,
@@ -605,6 +613,23 @@ def export_events():
     print(f"  events: {len(events)} total events generated")
 
 
+def export_type_effectiveness():
+    """Export the 18×18 type matchup grid"""
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT id, name FROM types ORDER BY id")
+    types = [dict(r) for r in cur.fetchall()]
+    cur.execute("""
+        SELECT atk_type_id, def_type_id, multiplier::float AS multiplier
+        FROM type_effectiveness
+    """)
+    entries = [dict(r) for r in cur.fetchall()]
+    write_json("type_effectiveness.json", {"types": types, "entries": entries})
+    print(f"  type effectiveness: {len(entries)} matchups across {len(types)} types")
+    cur.close()
+    conn.close()
+
+
 def export_type_biome_affinity():
     """Export type_biome_affinity table + type names + biome names"""
     conn = get_conn()
@@ -704,6 +729,7 @@ def main():
     export_food_chain()
     export_evolution_chains()
     export_type_biome_affinity()
+    export_type_effectiveness()
     export_stats()
     export_species()
     export_sprites()

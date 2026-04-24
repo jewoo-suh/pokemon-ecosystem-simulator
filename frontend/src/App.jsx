@@ -5,7 +5,7 @@ import WorldView from './components/WorldView';
 import './styles.css';
 
 function App() {
-  const [entered, setEntered] = useState(false);
+  const [entered, setEntered] = useState(() => Boolean(window.location.hash));
 
   return (
     <AnimatePresence mode="wait">
